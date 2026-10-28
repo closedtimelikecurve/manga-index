@@ -7,3 +7,8 @@ pytest>=8.0
 # ruff —— 静态检查（配置见 ruff.toml：E9 语法/运行时错误、F 未定义名与未用导入、C901 圈复杂度）
 # 注意：ruff 只是编辑器内的辅助提示，权威判定在 scripts/quality_gate.py
 ruff>=0.8
+#
+# qrcode —— 主程序是**可选**依赖（缺它时扫码配对接口给友好提示，其余功能正常），
+# 但 tests/test_pair_claim.py 要跑 /api/pair/qr 生成 SVG，所以开发/CI 必须装。
+# 3.6.161 补：此前没写进任何依赖文件，CI 上 8 条配对测试全红（本地装了才没暴露）。
+qrcode>=7.4

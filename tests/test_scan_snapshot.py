@@ -85,10 +85,16 @@ def test_scan_groups_snapshot_survives_rescan(env):
 
 
 def test_scan_groups_ignores_unknown_dirs(env):
-    """`_app` 之类程序目录、点目录、config 里的忽略名单都不算社团。"""
+    """程序目录、点目录、config 里的忽略名单都不算社团。
+
+    程序目录名**不能写死 `_app`**：`IGNORE_DIRS` 收的是 `basename(APP_DIR)`，而 CI 上
+    仓库叫 `manga-index`、检出目录就是 `manga-index`，写死会让这条只在本地绿、CI 红
+    （3.6.161 实际踩到：公开树首跑 CI 挂在这条）。
+    """
+    app_dir_name = os.path.basename(app.APP_DIR)
     root = env["root"]
-    (root / "_app").mkdir()
-    _mkzip(root / "_app" / "[噪声] 不该出现.zip")
+    (root / app_dir_name).mkdir()
+    _mkzip(root / app_dir_name / "[噪声] 不该出现.zip")
     (root / ".hidden").mkdir()
     _mkzip(root / ".hidden" / "[噪声] 也不该出现.zip")
     groups = app.scan_groups(str(root))
