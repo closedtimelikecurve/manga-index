@@ -1,0 +1,63 @@
+name: Bug 报告
+description: 功能不正常、报错、页面白屏等
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        提之前先确认两件事：
+        1. `VERSION` 文件里的版本号是最新的；
+        2. 用 `python scripts/test_panel.py start` 起的隔离实例也能复现（排除文库数据本身的问题）。
+
+        涉及安全问题的**不要发在这里**，请看 [SECURITY.md](../blob/main/SECURITY.md)。
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: `VERSION` 文件内容，或启动面板标题栏显示的版本
+      placeholder: "3.6.159"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 运行环境
+      options:
+        - Windows 10/11 + 网页端
+        - Windows 10/11 + Android APP
+        - 其它（请在下面补充）
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: 现象
+      description: 你做了什么、期望什么、实际什么。有报错就贴原文（注意先抹掉令牌和本地路径）。
+      placeholder: |
+        1. 打开「爬虫管理」→ 粘贴 3 个链接 → 启动
+        2. 期望：任务进队列
+        3. 实际：控制台报 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: |
+        `_logs/` 下的相关片段（`panel.log` / `crawl_log*.txt` / `Index_error.log`）。
+        **贴之前删掉 `bks-` 开头的令牌、你的内网 IP、以及作品标题。**
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我已确认上面没有包含令牌、内网 IP、作品文件等私人信息
+          required: true

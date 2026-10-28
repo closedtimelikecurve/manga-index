@@ -1,0 +1,8 @@
+# 换行符约定（2026-10-18）
+#
+# 只钉住"必须是 LF 才能跑"的文件：Git Bash / WSL 执行 shell 脚本时，
+# CRLF 会让 shebang 变成 `/bin/sh\r` → `bad interpreter`。
+# 其余文件不设 `* text=auto`（会给历史文件造成一次全仓重规范化的巨型 diff），
+# 继续沿用 git 的 core.autocrlf 默认行为。
+.githooks/* text eol=lf
+*.sh       text eol=lf

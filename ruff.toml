@@ -1,0 +1,41 @@
+# ruff —— 编辑器内即时反馈（3.6.47）
+#
+# 定位：**辅助，不是关卡**。权威判定在 scripts/quality_gate.py（由 pytest 自动执行），
+# 因为它按本项目口径与 docs/quality-budget.json 的棘轮额度判定。ruff 只负责
+# "边写边提示"：复杂度、未定义名、未用导入、明显错误。
+#
+# 用法（可选）：pip install ruff  → 编辑器装 Ruff 插件即生效
+#   ruff check .            # 全仓
+#   ruff check app.py       # 单文件
+
+line-length = 120
+target-version = "py313"
+
+exclude = [
+    "android",
+    "build-tools",
+    "dist",
+    "backups",
+    "app_releases",
+    "_cache",
+    "_inbox",
+    "_logs",
+    "_state",
+    "__pycache__",
+    ".pytest_cache",
+]
+
+[lint]
+# E9 = 语法/运行时错误；F = pyflakes（未定义名/未用导入）；C901 = 圈复杂度
+select = ["E9", "F", "C901"]
+
+[lint.mccabe]
+# 与 docs/engineering-discipline.md §3.1 的函数上限一致
+max-complexity = 15
+
+[lint.per-file-ignores]
+# 测试里 fixture 的导入常被 pytest 间接使用；爬虫脚本有 sys.path 引导再导入
+"tests/*" = ["F401"]
+"crawlers/*" = ["E402"]
+"app.py" = ["E402"]
+"panel/*" = ["E402"]

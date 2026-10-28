@@ -1,0 +1,83 @@
+# ===== 运行时产物 / 缓存 / 日志（可随时重建）=====
+# 3.7 Stage3：日志 / 断点状态 / 缓存统一归入下划线功能目录（代码只写这里）
+_logs/
+_state/
+_cache/
+.pytest_cache/
+__pycache__/
+build/
+dist/
+
+# 3.7 Stage3 之前的旧位置：留条目兜底（运行中的旧实例/历史残留可能仍在写这些名字）
+.thumb_cache/
+.low_cache/
+.jm_tmp/
+.nh_tmp/
+.upload_tmp/
+crawl_log*.txt
+crawl_state*.json
+Index_error.log
+migrate_log_*.log
+library_index.json
+region_covers.json
+library_index_*.json
+panel.log
+panel_8766.log
+*.pyc
+
+# ===== 备份与打包产物 =====
+backup/
+*.bak
+Index.exe
+Index.exe.bak
+
+# ===== 媒体文件（不应出现在程序目录）=====
+*.zip
+*.rar
+*.cbr
+*.cbz
+
+# ===== 其他 =====
+.zcode/
+.DS_Store
+Thumbs.db
+app_releases/*.apk
+
+# ===== 安卓工具链与构建产物（就地编译，均可重建）=====
+android/toolchain/
+android/.gradle/
+android/local.properties
+android/app/build/
+
+# ===== 3.0 元数据层（运行时库与备份，可整体删除回退 2.15 行为）=====
+meta.db
+meta.db-wal
+meta.db-shm
+backups/
+.workbuddy/
+
+# ===== 3.6.3 收件箱：程序目录内部的功能性目录（作品实体，不入库）=====
+_inbox/
+pending_jmdl_titles.txt
+pending_jmdl_ids.txt
+
+# ===== 爬虫清单（用户运行时数据，不入库）=====
+# 3.6.150：清单文件名统一改为 ASCII（原 待爬*.txt），避免中文路径在跨工具/命令行下出问题
+pending_wnacg.txt
+jm_id_map.txt
+crawl_list_*
+
+
+# 事故现场留档（含数据库/索引副本，不入库）
+_rescue_*/
+
+# N站凭证（API Key / User Token，勿入库）
+.nh_secrets.json
+
+# 本机配置：config.json 含主令牌 / 文库根 / 个人整理数据（originals、artist_circles），
+# 一律不入库。仓库只保留 config.example.json 模板（3.6.160：此前漏配，token 曾随库带入）。
+config.json
+
+# ===== IDE / 工具缓存 =====
+.idea/
+*.dll.log

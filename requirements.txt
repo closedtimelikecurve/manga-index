@@ -1,0 +1,19 @@
+# 本地同人志文库 依赖
+# 安装：pip install -r requirements.txt
+#
+# flask —— Web 后端（必需）
+flask>=3.0
+#
+# pillow —— 封面缩略图（强烈建议，作品多时页面加载明显更快）
+pillow>=9.0.0
+#
+# waitress —— 生产 WSGI 服务器（3.3.0 起替换 werkzeug dev server；未装则自动回退）
+waitress>=3.0
+#
+# rarfile —— 支持 .rar / .cbr 压缩包内封面提取
+# 注意：还需要系统安装 WinRAR 或 unrar，并把 unrar.exe 所在目录加入 PATH
+rarfile>=4.0
+#
+# 以下为可选工具脚本依赖（不在主程序依赖内）：
+# jmcomic —— 仅 crawl_jm_ids.py（禁漫 ID 定向爬取）需要：pip install jmcomic
+# pytest  —— 运行 tests/ 回归测试：pip install pytest

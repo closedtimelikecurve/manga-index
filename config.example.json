@@ -1,0 +1,22 @@
+{
+  "_说明": "复制为 config.json 后填写。此文件是模板：真实 config.json 含 token，不入库。",
+  "root": "D:\\my-library",
+  "port": 8765,
+  "name": "Index",
+  "token": "",
+  "no_browser": false,
+  "thumb_max_bytes": 209715200,
+  "pair_url": null,
+  "pair_ticket_ttl": null,
+  "ignore_files": [],
+  "originals": null,
+  "artist_circles": {},
+  "_ext_downloaders说明": "外接下载器工具表（3.6.155）。cmd 里的 {url}=清单行原文、{dest}=本次暂存目录；timeout 秒（0/缺省=1800）。工具需自行安装并在 PATH 或写绝对路径。",
+  "ext_downloaders": [
+    {
+      "name": "gallery-dl",
+      "cmd": "gallery-dl -d \"{dest}\" {url}",
+      "timeout": 1800
+    }
+  ]
+}

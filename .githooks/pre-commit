@@ -1,0 +1,15 @@
+#!/bin/sh
+# 工程纪律提交前拦截（约 1 秒，纯 AST，不跑测试）。
+# 启用（一次性）：git config core.hooksPath .githooks
+# 临时跳过（不推荐，且请在提交信息里说明）：git commit --no-verify
+# 规则见 docs/engineering-discipline.md
+
+PY="${PYTHON:-python}"
+if ! "$PY" scripts/quality_gate.py; then
+    echo ""
+    echo "提交被拦截：工程纪律检查未通过。"
+    echo "  规则与豁免流程：docs/engineering-discipline.md"
+    echo "  只看报告不改判定：$PY scripts/quality_gate.py --report"
+    exit 1
+fi
+exit 0

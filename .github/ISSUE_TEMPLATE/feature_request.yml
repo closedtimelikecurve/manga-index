@@ -1,0 +1,40 @@
+name: 功能建议
+description: 想要的新能力或体验改进
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你想解决什么问题
+      description: 先说场景和痛点，不用急着给方案
+      placeholder: 文库里有 300 多个社团，想按"最近三个月新增"筛一遍，现在只能一个个点。
+    validations:
+      required: true
+
+  - type: textarea
+    id: idea
+    attributes:
+      label: 你设想的做法（可选）
+      description: 有想法就写，没有也没关系
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: 涉及哪一端
+      options:
+        - 网页端
+        - Android APP
+        - 两端都要（按工程纪律要成对改）
+        - 只涉及后端 / 数据结构
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: willing
+    attributes:
+      label: 参与意愿
+      options:
+        - label: 我愿意提 PR 实现（会先读 docs/engineering-discipline.md）
+          required: false

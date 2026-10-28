@@ -1,0 +1,71 @@
+{
+  "_doc": "工程纪律量化预算（只降不升）。规则见 docs/engineering-discipline.md §3",
+  "generated": "2026-10-20",
+  "limits": {
+    "file_lines": 800,
+    "code_lines": 400,
+    "func_lines": 50,
+    "func_cc": 15
+  },
+  "files": {},
+  "func_debt": {
+    "tests/test_artist_rename.py::test_rename_artist_moves_files_records_and_survives_rescan": {
+      "lines": 29,
+      "cc": 19
+    },
+    "tests/test_crawl_parallel.py::test_three_tasks_run_independently": {
+      "lines": 29,
+      "cc": 19
+    },
+    "tests/test_inbox.py::test_inbox_register_propose_and_scan_skip": {
+      "lines": 19,
+      "cc": 19
+    },
+    "tests/test_meta_store.py::test_collections_crud": {
+      "lines": 33,
+      "cc": 17
+    },
+    "tests/test_meta_store.py::test_reading_stats_and_mark_seen": {
+      "lines": 34,
+      "cc": 18
+    },
+    "tests/test_meta_store.py::test_export_manifest_and_file": {
+      "lines": 27,
+      "cc": 17
+    },
+    "tests/test_originals_manual.py::test_originals_endpoints_create_and_remove_zone": {
+      "lines": 23,
+      "cc": 18
+    },
+    "tests/test_originals_manual.py::test_originals_rename_moves_tags_and_config": {
+      "lines": 29,
+      "cc": 21
+    },
+    "tests/test_scan_incremental.py::test_nested_archive_pages_counted_and_readable": {
+      "lines": 19,
+      "cc": 16
+    },
+    "tests/test_v330_swr_cache.py::_scan_endpoints_and_funcs": {
+      "lines": 27,
+      "cc": 21
+    }
+  },
+  "silent_except": {
+    "common.py": 2,
+    "crawlers/crawl_wnacg.py": 1,
+    "crawlers/wnacg_base.py": 2,
+    "launcher_core.py": 2,
+    "launcher_proc.py": 6,
+    "launcher_ui.py": 2,
+    "meta_store.py": 3,
+    "migrate.py": 1,
+    "panel/archive.py": 2,
+    "routes/admin.py": 2,
+    "services/covers.py": 1,
+    "services/index_cache.py": 1,
+    "services/meta_backup.py": 1,
+    "services/opener.py": 1,
+    "services/panel_admin.py": 1,
+    "services/server.py": 2
+  }
+}
