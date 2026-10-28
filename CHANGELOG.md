@@ -85,6 +85,18 @@
 
 教训：这类像素活别靠眼睛估，`y=某行` 逐行统计亮像素占比 + 逐列扫色值跳变，一轮就能定准。
 
+### 首发 CI 三连红：三处只有干净环境才暴露的问题
+
+公开树推到 GitHub 后 CI 失败了三次，每次都是**本地永远复现不出来**的那类：
+
+| 轮次 | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | 两个 job 都挂在「工程纪律闸门」 | `quality_gate.py` 打印中文报告 → windows runner 控制台编码是 **cp1252**，`UnicodeEncodeError` 崩在最后一行 | workflow 顶层加 `PYTHONUTF8=1` / `PYTHONIOENCODING=utf-8` |
+| 2 | 9 条测试红：`test_scan_snapshot` 1 条 + 配对/令牌 8 条 | ① 测试把「程序目录」写死成 `_app`，而 `IGNORE_DIRS` 收的是 `basename(APP_DIR)`，CI 检出目录叫 `manga-index`；② `qrcode` 是主程序的可选依赖，**没写进任何依赖文件**，CI 上 `/api/pair/qr` 直接 500 | ① 测试改用 `os.path.basename(app.APP_DIR)`；② `requirements-dev.txt` 补 `qrcode` |
+| 3 | — | — | 3.12 / 3.13 两个 job 全绿 |
+
+教训一句话：**本地装了的东西不等于依赖清单里有**，而"目录名"这种隐含约定在别人机器上就是随机值。
+
 ### 验证
 
 - 新增 `tests/test_safe_covers.py` 8 项：开着走占位图（含无参数也走）、关着走原逻辑、图缺失回退、探针封面同盖、POST 切换与落盘、`"false"` 字符串不算开、`--safe-images` 旧行为不被顶掉
