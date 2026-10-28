@@ -10,6 +10,13 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# 3.6.161 补：windows-latest 的控制台编码是 cp1252（en-US 区域），而 quality_gate 与
+# pytest 都会往 stdout 打中文 —— 不设这两个变量会直接 UnicodeEncodeError 崩在最后一行
+# 报告上（本地是 GBK 所以永远复现不出来，只有 CI 红）。
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
 jobs:
   test:
     # 主目标平台是 Windows：启动面板、进程管理、局域网配对都按 Windows 实现，
