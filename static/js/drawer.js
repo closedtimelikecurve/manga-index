@@ -63,9 +63,11 @@ async function toggleSafeCovers() {
     state.config = await api('/api/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ safe_covers: next }),
+      // 3.6.162：各端独占——只切网页这一端，手机端保持它自己的设置
+      body: JSON.stringify({ safe_covers: next, safe_covers_scope: 'web' }),
     });
-    showToast(next ? t('内测模式已开启：封面已换成占位图') : t('内测模式已关闭'));
+    showToast(next ? t('内测模式已开启：封面已换成占位图（仅网页）')
+                   : t('内测模式已关闭（仅网页）'));
     route();                    // 重渲染当前视图，封面带新 URL 重新取
   } catch (e) {
     showToast(t('切换失败') + '：' + (e && e.message ? e.message : e));

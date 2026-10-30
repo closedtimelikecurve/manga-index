@@ -95,8 +95,9 @@ function crawlJobHtml(d) {
 function crawlJobCard(it) {
   const label = crawlJobStates()[it.state] || it.state;   // 3.6.140 状态表函数化（切语言跟随）
   const cover = it.cover
-    ? '<img class="probe-cover" loading="lazy" alt="" src="/api/crawl/probe/cover?u=' +
-      encodeURIComponent(it.cover) + '" onerror="this.classList.add(&#39;err&#39;)">'
+    ? '<img class="probe-cover" loading="lazy" alt="" src="' + esc(safeCoverUrl(
+        '/api/crawl/probe/cover?u=' + encodeURIComponent(it.cover))) +
+      '" onerror="this.classList.add(&#39;err&#39;)">'
     : '<div class="probe-cover ph">🎴</div>';
   return '<div class="probe-card cj-card s-' + esc(it.state) + '" data-idx="' + it.idx + '">' +
     cover +

@@ -93,9 +93,11 @@ def api_originals_add():
     if not term:
         return jsonify({"ok": False, "message": "分区名不能为空"}), 400
     canon = term
-    # existed：与既有分区**字面**同名（同名即并入）；必须在 originals_add 之前算
-    existed = any(z["name"] == canon for z in meta.originals_all())
     cur = [str(x).strip() for x in (h().CFG.get("originals") or []) if str(x).strip()]
+    # existed：与既有分区**字面**同名（同名即并入）；必须在 originals_add 之前算。
+    # 3.6.170：还要看词条库——**空分区**（只在 config 落名、没有作品挂标签）不在
+    # `originals_all()` 里，否则重复建同名空分区会被判成"新建"，前端提示跟着说谎。
+    existed = any(z["name"] == canon for z in meta.originals_all()) or canon in cur
     if canon not in cur:
         h().CFG["originals"] = cur + [canon]
         h().save_config(h().CFG)

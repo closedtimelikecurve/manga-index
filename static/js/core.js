@@ -98,6 +98,15 @@ function coverUrl(group, work, ver) {
          (state.config && state.config.safeCovers ? '&sc=1' : '') +
          (getToken() ? '&token=' + enc(getToken()) : '');
 }
+/* 3.6.163：给「非 /cover 的封面地址」补内测缓存键。
+   探针与清单爬虫的封面走 /api/crawl/probe/cover，真实图响应头是 max-age=604800（7 天），
+   而它们的 URL 原先不随内测开关变化——开关打开后，之前看过的封面仍从浏览器缓存取真图，
+   表现就是"部分作品的封面没换"。让 URL 跟着开关走即可（服务端不解析 sc，只当缓存键）。 */
+function safeCoverUrl(src) {
+  if (!src) return src;
+  if (!(state.config && state.config.safeCovers)) return src;
+  return src + (src.indexOf('?') < 0 ? '?' : '&') + 'sc=1';
+}
 function pageUrl(group, work, n, ver) {
   return '/page?group=' + enc(group) + '&work=' + enc(work) + '&n=' + n +
          (ver ? '&v=' + enc(String(ver)) : '') +
@@ -113,16 +122,18 @@ function pageUrl(group, work, n, ver) {
 const SORT_KEY = 'circle_sort', SORT_ASC_KEY = 'circle_sort_asc';
 function sortMode() {
   const m = localStorage.getItem(SORT_KEY) || 'updated';
-  return m === 'touched' ? 'updated' : m;
+  // touched（3.6.151 删）与 size（3.6.166 删）都按 updated 处理——旧偏好不会卡住排序
+  return (m === 'touched' || m === 'size') ? 'updated' : m;
 }
 function sortIsAsc() { return localStorage.getItem(SORT_ASC_KEY) === '1'; }
 function sortGroups(list) {
   const m = sortMode(), asc = sortIsAsc();
   // 3.6.154：时间档按**整秒**比较——首扫同一批新社团的「最近入库」只差几微秒，
   // 不取整的话"同值按名字"的补位永远不会生效，顺序会随扫描顺序抖（与服务端同口径）。
+  // 3.6.166：社团排序**没有**文件大小档了（用户要求：大小只在分区内部按作品排）。
+  // 存量的 'size' 偏好一律按 updated 处理，旧缓存不会因此排错。
   const key = g => m === 'created' ? Math.round(g.createdAt || 0)
                  : m === 'count' ? (g.workCount || 0)
-                 : m === 'size' ? (g.totalBytes || 0)
                  : Math.round(g.updatedAt || 0);
   return list.slice().sort((a, b) => {
     const ka = key(a), kb = key(b);
@@ -135,13 +146,12 @@ function sortDirLabel() {
   // 用户明确要求：箭头跟着翻转会让人以为排序维度变了，实际只是顺序反过来。
   const asc = sortIsAsc(), m = sortMode();
   if (m === 'count') return asc ? t('↓ 由少到多') : t('↓ 由多到少');
-  if (m === 'size') return asc ? t('↓ 由小到大') : t('↓ 由大到小');
   return asc ? t('↓ 由旧到新') : t('↓ 由新到旧');
 }
 function sortBarHtml() {
   const m = sortMode();
   const modes = [['updated', t('最近入库')], ['created', t('创建时间')],
-                 ['count', t('作品数量')], ['size', t('文件大小')]];
+                 ['count', t('作品数量')]];
   return '<div class="sort-bar" id="sortBar">' +
     '<span class="sort-label">' + esc(t('排序')) + '</span>' +
     modes.map(([k, label]) =>

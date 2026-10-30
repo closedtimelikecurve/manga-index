@@ -48,7 +48,8 @@ def api_probe_search():
 
 def api_probe_cover():
     """封面（高压缩）：命中缓存直接回，未命中才出站抓取。白名单在服务层。"""
-    safe = safecover.response()             # 3.6.161 内测模式：探针封面同样盖住
+    # 3.6.161 内测模式：探针封面同样盖住；3.6.162 按端取各自的开关
+    safe = safecover.response(h().client_scope())
     if safe is not None:
         return safe
     if getattr(h(), "SAFE_IMAGES", False):   # 3.6.118 测试模式：占位图

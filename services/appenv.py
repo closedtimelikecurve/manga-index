@@ -8,8 +8,22 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 
-from common import APP_DIR, ensure_dir
+from common import APP_DIR, ensure_dir, safe_covers_on
 from panel.host import h
+
+
+def client_scope():
+    """当前请求来自哪一端：**APP 声明，浏览器默认**。
+
+    APP 从 3.7.111 起在请求头带 `X-Client: app`（见 Api.kt 的 `request_base`）；
+    浏览器不会发这个头，一律算 web。拿不到请求上下文时（启动日志里顺带调用）也不炸，
+    按 web 处理——那是最保守的一侧，不会给 APP 误开遮挡。
+    """
+    try:
+        from flask import request
+        return "app" if (request.headers.get("X-Client") or "").strip().lower() == "app" else "web"
+    except Exception:                                   # noqa: BLE001 —— 无请求上下文
+        return "web"
 
 
 def setup_logging():
@@ -47,9 +61,13 @@ def config_payload():
         # 3.6.156：本发行版可用的爬取任务（公开版无 wnacg/N站/E站适配 → 只剩 jmdl/ext，
         # 双端据此隐藏对应胶囊与站点入口；完整发行版恒为全部 7 个）
         "builtinKinds": h().available_kinds(),
-        # 3.6.161：内测模式开关的当前状态——双端抽屉按它显示开关位置，
-        # APP 每次拉 /api/config 时顺带同步（网页改过，手机端打开就看到最新值）。
-        "safeCovers": bool(h().CFG.get("safe_covers")),
+        # 3.6.161：内测模式开关的当前状态——双端抽屉按它显示开关位置。
+        # 3.6.162：改为**各端独占**。`safeCovers` 回的是当前请求端自己的值
+        # （老 APP 只认这个字段，行为不变）；另两个字段给出两端的真实状态，供面板展示。
+        "safeCovers": safe_covers_on(h().CFG, client_scope()),
+        "safeCoversWeb": safe_covers_on(h().CFG, "web"),
+        "safeCoversApp": safe_covers_on(h().CFG, "app"),
+        "clientScope": client_scope(),
     }
 
 def _browser_open_suppressed(args):

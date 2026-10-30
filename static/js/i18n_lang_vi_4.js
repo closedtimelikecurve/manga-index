@@ -33,5 +33,13 @@ Object.assign(I18N_PACKS['vi'], {
   "内测模式：所有封面统一换成占位图（截图 / 录屏用，不动任何文件）": "Che bìa: thay mọi ảnh bìa bằng một ảnh giữ chỗ (dùng khi chụp hoặc quay màn hình, không động vào tệp)",
   "内测模式已开启：封面已换成占位图": "Đã bật che bìa: ảnh bìa hiển thị ảnh giữ chỗ",
   "内测模式已关闭": "Đã tắt che bìa",
+  "内测模式已开启：封面已换成占位图（仅网页）": "Đã bật che bìa: ảnh bìa hiển thị ảnh giữ chỗ (chỉ trên web)",
+  "内测模式已关闭（仅网页）": "Đã tắt che bìa (chỉ trên web)",
   "切换失败": "Chuyển đổi thất bại",
+  "新建一个空的同人分区（之后在分区里「＋ 添加作品」补作品）": "Tạo khu doujin trống (thêm tác phẩm sau bằng 「＋ Thêm tác phẩm」 trong khu)",
+  "新建分区": "Khu mới",
+  "建一个空的同人分区": "Tạo khu trống",
+  "新建同人分区：输入分区名（先建一个空分区，之后在分区里点「＋ 添加作品」补作品）": "Khu doujin mới: nhập tên khu (tạo khu trống trước, sau đó thêm tác phẩm bằng 「＋ Thêm tác phẩm」 trong khu)",
+  "分区「%1」已存在": "Khu 「%1」 đã tồn tại",
+  "已新建分区「%1」": "Đã tạo khu 「%1」",
 });

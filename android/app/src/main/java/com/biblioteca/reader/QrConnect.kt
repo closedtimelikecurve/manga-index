@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -172,18 +173,32 @@ internal fun QrConnectRow(onDecoded: (url: String, token: String) -> Unit,
 private suspend fun exchangeTicket(ctx: Context, target: PairTarget): Pair<String, String> =
     withContext(Dispatchers.IO) {
         verifyServerIdentity(ctx, target.url)?.let { return@withContext "" to it }
-        val (code, body) = claimDeviceToken(target)
+        val (code, body) = claimDeviceToken(ctx, target)
         val token = body.optString("token")
         if (code != 200 || token.isEmpty()) return@withContext "" to pairClaimError(code, body)
         saveServerIdentity(ctx, target.url, body.optString("sk"))
         token to ""
     }
 
-/** claim 的网络调用（IO 里执行，异常折成 -1，让调用方统一走错误提示）。 */
-private suspend fun claimDeviceToken(target: PairTarget): Pair<Int, JSONObject> =
+/** 设备机器码：`ANDROID_ID` 在同一台设备上稳定（恢复出厂/换 ROM 才变），
+ *  足够让服务端认出"还是这台手机"。取不到返回空串——服务端会退化成旧行为（每次新建），
+ *  不会因此配对失败。 */
+private fun machineCode(ctx: Context): String =
+    try {
+        Settings.Secure.getString(ctx.contentResolver, Settings.Secure.ANDROID_ID) ?: ""
+    } catch (_: Exception) {
+        ""
+    }
+
+/** claim 的网络调用（IO 里执行，异常折成 -1，让调用方统一走错误提示）。
+ *
+ *  3.7.111：把机器码与本机已有令牌一并递上去——服务端靠它判断"这台手机登记过没有"，
+ *  登记过就不再新增设备、也不换 token（本地令牌还有效时原样复用）。 */
+private suspend fun claimDeviceToken(ctx: Context, target: PairTarget): Pair<Int, JSONObject> =
     withContext(Dispatchers.IO) {
         try {
-            Api.claimPair(target.url, target.ticket, android.os.Build.MODEL ?: "")
+            Api.claimPair(target.url, target.ticket, android.os.Build.MODEL ?: "",
+                          machine = machineCode(ctx), knownToken = Api.token)
         } catch (e: Exception) {
             -1 to JSONObject().put("message", e.message ?: "")
         }

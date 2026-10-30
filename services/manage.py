@@ -4,6 +4,7 @@
 为什么连组内互调也走 `h()`：测试大量 `monkeypatch.setattr(app, "_delete", ...)`
 （`test_delete_api` / `test_features_v23`）；组内直呼模块函数会绕过桩、真删文件。
 """
+import hashlib
 import os
 import shutil
 import sys
@@ -93,7 +94,10 @@ def _resolve_archive_term(parsed, full_name, current):
     但它其实是**独立的一条业务规则**：文件名解析结果 → 档案目录词条。
 
     返回 (parsed, term, dissolved_hit)：
-      * term 非空 = 归档到该词条的档案夹；空 = 留在收件箱；
+      * term 非空 = 归档到该词条的档案夹；
+      * term 为空 = **不归档**：只规范化文件名、不移动（作品留在原目录；原本在收件箱的仍在
+        收件箱）。"不擅自移走"是刻意的——黑名单/已解散词条降级时，把文件踢到别处比留在
+        原地更让人困惑（见 `test_apply_rename_blocked_by_blacklist`）；
       * dissolved_hit = 命中的已解散社团名（仅用于给用户一句准确的提示）。
     优先级（顺序即语义，改动前先看 MEMORY「寻址」章）：
       ① 文件名的社团名；
@@ -180,11 +184,11 @@ def _apply_rename(w, new_full_name, group_hint=""):
     if term:
         dest_name = h()._existing_archive_dir(h()._coop_primary(term))
         dest_dir = os.path.abspath(os.path.join(h().CFG.get("root", ""), dest_name))
-        if dest_dir == os.path.abspath(parent) and new_full_name == current:
+        if _same_path(dest_dir, parent) and new_full_name == current:
             return True, "文件名无需修改（已在对应档案夹内）"
     if not term and new_full_name == current:
         if dissolved_hit:
-            return True, f"社团「{dissolved_hit}」已解散，词条降级保留在收件箱"
+            return True, f"社团「{dissolved_hit}」已解散，词条降级，作品留在原处"
         return True, "文件名无需修改"
 
     dst, err = _rename_in_place(w["path"], new_full_name, current, parent)
@@ -194,13 +198,31 @@ def _apply_rename(w, new_full_name, group_hint=""):
     if early is not None:
         return early
     h()._lib_touch()
+    return True, _rename_outcome(term, filed, dissolved_hit, parent)
+
+
+def _rename_outcome(term, filed, dissolved_hit, parent):
+    """改名结束后该回什么话（3.6.174 从 `_apply_rename` 尾部抽出：三种位置的判断把那个
+    函数顶到 57 行 / cc 17）。
+
+    **没识别出社团时文件并没有被移动**，所以提示必须写出它究竟留在哪：
+    从前这里一律说"保留在收件箱"，而实现只做原地改名——用户按提示去收件箱翻，
+    自然什么都没有（2026-10-30 报障）。"不擅自移走"是刻意的（黑名单/已解散降级时
+    把文件踢到别处比留在原地更让人困惑），错的只是这句话。
+    """
     if filed:
-        return True, f"已规范化并归档到社团「{filed}」"
+        return f"已规范化并归档到社团「{filed}」"
     if term:
-        return True, f"已规范化（作品位于社团「{term}」内）"
+        return f"已规范化（作品位于社团「{term}」内）"
+    if _same_path(parent, h()._inbox_dir()):
+        tail = "仍在收件箱"
+    elif _same_path(parent, h().CFG.get("root", "")):
+        tail = "留在文库根目录（散包区），未移动"
+    else:
+        tail = f"留在原目录「{os.path.basename(parent)}」，未移动"
     if dissolved_hit:
-        return True, f"已规范化（社团「{dissolved_hit}」已解散，保留在收件箱）"
-    return True, "已规范化（未识别出社团，保留在收件箱）"
+        return f"已规范化（社团「{dissolved_hit}」已解散，{tail}）"
+    return f"已规范化（未识别出社团，{tail}）"
 
 
 def _sanitize_full_name(new_full_name):
@@ -227,21 +249,31 @@ def _rename_in_place(path, new_full_name, current, parent):
 def _archive_into(dst, dest_dir, parent, old_group, wname):
     """把已改好名的作品搬进目标档案夹。返回 (filed, 提前返回的结果|None)。
 
-    重复守卫：目标里已有同名同大小作品（部分成功/重复下载所致）→ 直接删掉手上这份，
-    **绝不造 "(2)" 第二份**。
+    重复守卫：目标里已有**同名同大小且内容一致**的作品（部分成功/重复下载所致）→
+    直接删掉手上这份，**绝不造 "(2)" 第二份**。提示里说清在**哪个目录**清的——从前
+    一律写"收件箱"，目标是社团目录时也是这句话，用户会去收件箱找一个根本没进过收件箱的文件。
+
+    **判重前必须确认是两份不同文件**（`_same_size_file`）+ 内容真的相同（`_same_content`）：
+    2026-10-30 因为目录名大小写差异，`pre` 指向了 `dst` 自己，"同名同大小"成立，
+    四部 777~1036 页的作品被当重复删掉。凡是拿不准的一律**不删**，另存一份。
     """
-    if not dest_dir or os.path.abspath(dest_dir) == os.path.abspath(parent):
+    if not dest_dir or _same_path(dest_dir, parent):
         _meta_moved(old_group, wname, dst)      # 仅改名未挪目录（或目标即当前目录）
         return "", None
     try:
         os.makedirs(dest_dir, exist_ok=True)
         pre = os.path.join(dest_dir, os.path.basename(dst))
-        if _same_size_file(pre, dst):
+        dup = _same_size_file(pre, dst)
+        if dup and _same_content(pre, dst):
             h()._archive_quiesce([dst])
             if h()._delete(dst):
                 h()._lib_touch()
-                return "", (True, "已存在相同作品，已清理收件箱重复项"
-                                  f"（社团「{os.path.basename(dest_dir)}」）")
+                where = ("收件箱" if _same_path(dest_dir, h()._inbox_dir())
+                         else f"社团「{os.path.basename(dest_dir)}」")
+                return "", (True, f"已存在相同作品，已清理重复项（{where}）")
+        elif dup:
+            # 同名同大小、内容却不同：不是重复。照常另存，谁都不删。
+            h().log.warning("判重跳过：%s 与 %s 同名同大小但内容不同，另存不删", pre, dst)
         final = h().unique_path(pre)
         ok, err = h()._rename_with_retry(dst, final)
         if not ok:
@@ -256,12 +288,56 @@ def _archive_into(dst, dest_dir, parent, old_group, wname):
         return "", (True, f"已规范化，但归档移动失败：{e}")
 
 
+def _same_path(a, b):
+    """两个路径是否指向**同一个文件/目录**。
+
+    **不能用 `os.path.abspath(a) == os.path.abspath(b)`**：那只是字符串比较，而 Windows
+    上 `D:\\<文库根>\\Someartist` 与 `D:\\<文库根>\\SomeArtist` 是**同一个目录**、字符串却不等。
+    `os.path.samefile` 走文件系统（顺带识破 8.3 短名与软链），路径还没建出来时退回
+    normcase 比较。2026-10-30 的删档事故就是字符串比较造成的，别改回去。
+    """
+    if not a or not b:
+        return False
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
+
+
 def _same_size_file(pre, dst):
-    """目标里已有同名同大小的非空文件（判重复用）。"""
-    if not os.path.exists(pre):
+    """目标里已有同名同大小的**另一个**非空文件（判重复用）。
+
+    **同一个文件不算重复**（`_same_path` 先拦住）。2026-10-30 事故链：
+    改名 `[AIGenerated] Someartist1.zip` 后探出的归档目录是 `Someartist`（f 小写），
+    真实目录是 `SomeArtist`——字符串比较判成"另一个目录"，`_archive_into` 于是把
+    `pre` 拼成 dst 自己，同名同大小当然成立 → 刚改好名的作品被当重复**删掉**
+    （4 部 777~1036 页）。判重只能"确认是两份不同文件"才成立。
+    """
+    if not os.path.exists(pre) or _same_path(pre, dst):
         return False
     size = h()._path_size(dst)
     return size > 0 and h()._path_size(pre) == size
+
+
+def _same_content(a, b):
+    """两个文件内容是否**逐字节一致**（判重的第二道闸）。
+
+    判重以前只看"同名 + 大小相同"，够快但会误杀：同社同标题的两份不同内容、
+    或者残缺下载恰好凑成同样字节数，都会被当成重复直接删掉，而 `_delete` 不进回收站。
+    大小相同已经很难得，这里再把内容比一遍——几百分之一秒的读盘，换"绝不删错"。
+    算不出来（被占用 / 读取失败）一律当作**不同**：宁可留一份多余的。
+    """
+    def digest(p):
+        hh = hashlib.sha1()
+        with open(p, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                hh.update(chunk)
+        return hh.hexdigest()
+
+    try:
+        return digest(a) == digest(b)
+    except OSError:
+        return False
 
 
 def _meta_moved(old_group, wname, new_path):

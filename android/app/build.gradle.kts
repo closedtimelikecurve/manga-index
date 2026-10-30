@@ -28,7 +28,7 @@ android {
         // 面板轴与 APP 轴互相独立（分轴版号）：versionName 不再要求等于面板 VERSION/PANEL_VERSION；
         // 与面板的接口兼容性由 APP_API_LEVEL（Api.kt）↔ /api/config 的 apiLevel/minAppApi 判定。
         versionCode = autoVersionCode
-        versionName = "3.7.110"
+        versionName = "3.7.113"
     }
     buildFeatures { compose = true }
     compileOptions {

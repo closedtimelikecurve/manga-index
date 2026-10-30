@@ -251,14 +251,26 @@ def api_app_release_download(name):
 
 
 def _apply_safe_covers(body):
-    """3.6.161 内测模式开关。返回 True = 本次**只**切了这一个开关。
+    """内测模式开关（3.6.161；3.6.162 改为各端独占）。返回 True = 本次**只**切了这一个开关。
 
     调用方据此提前返回：这个开关不碰文库数据，不该顺带触发 _lib_touch 的全库重扫。
     必须用 `in body` 判——关掉时值是 False，`if body.get(...)` 会让"关"永远不生效。
+
+    改哪一端：
+      * body 带 `safe_covers_scope`（"web" / "app"）→ 只改那一端；
+      * 不带 → 两端一起改。3.6.162 之前的网页与 APP 都是这么调的，必须保持可用，
+        否则老客户端一点开关就把另一端的设置也带走。
     """
     if "safe_covers" not in body:
         return False
-    h().CFG["safe_covers"] = bool(body["safe_covers"])
+    on = common._truthy(body["safe_covers"])
+    cur = common._norm_safe_covers(h().CFG.get("safe_covers"))
+    scope = str(body.get("safe_covers_scope") or "").strip().lower()
+    if scope in common.SAFE_COVERS_SCOPES:
+        cur[scope] = on
+    else:
+        cur = {k: on for k in common.SAFE_COVERS_SCOPES}
+    h().CFG["safe_covers"] = cur
     return not any(k in body for k in ("root", "name", "port", "originals"))
 
 

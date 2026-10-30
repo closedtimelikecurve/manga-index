@@ -54,7 +54,7 @@ def _term_key(s):
       站内还有 `[TOZAN：BU (富士やま)]…`）。肉眼同源，字符串上却是六个互不相认的陌生人——
     旧的 `_canon_circle` 只剥**结尾**下划线，对上述变体一律无感，词条库因此碎成一地，
     新出现的写法永远"不认识"，只能停在待定词条。"""
-    s = _canon_circle(str(s or "").strip())
+    s = _dp.fold_variants(_canon_circle(str(s or "").strip()))
     return re.sub(r"[\s_\-—－:：,，、.・]+", "", s).lower()
 
 def _term_index(force=False):
@@ -84,11 +84,18 @@ def _terms_from_db():
     circles, authors, main_map = {}, {}, {}      # 失败时保留已收集部分（下面 except 不抛）
     try:
         con = meta._connect()
-        for (c,) in con.execute("SELECT DISTINCT circle FROM works WHERE circle<>''"):
+        # 按作品数降序取代表写法（3.6.173）：`_term_key` 折叠字形后，一组写法（浜/濱/滨）
+        # 可能同时存在多条历史记录。若按 SELECT 的自然顺序 setdefault，代表名就取决于
+        # 数据库返回顺序，档案会在两次扫描之间来回跳。以作品最多的写法为准，稳定且符合直觉。
+        for c, _n in con.execute(
+                "SELECT circle, COUNT(*) FROM works WHERE circle<>'' "
+                "GROUP BY circle ORDER BY COUNT(*) DESC, circle"):
             c = str(c or "").strip()
             if c and not _term_blacklisted(c):
                 circles.setdefault(_term_key(c), c)
-        for (a,) in con.execute("SELECT DISTINCT author FROM work_authors"):
+        for a, _n in con.execute(
+                "SELECT author, COUNT(*) FROM work_authors WHERE author<>'' "
+                "GROUP BY author ORDER BY COUNT(*) DESC, author"):
             a = str(a or "").strip()
             if a and not _term_blacklisted(a):
                 authors.setdefault(_term_key(a), a)
@@ -193,6 +200,20 @@ def _resolve_bare(bare):
     if k in idx["authors"]:
         return {"as": "personal", "circle": _main_circle_of(idx["authors"][k]) or ""}
     return None
+
+def _canon_author_resolved(a):
+    """画师规范名（3.6.173）：笔名归一后回填**库里已有的那个写法**，与 `_canon_circle_resolved` 对称。
+
+    起因：JM 是台湾站，同一个画师会出现「南浜よりこ」（日文新字体）与「南濱よりこ」（繁体）
+    两种写法，被当成两个人。`_term_key` 折叠字形后两者同键，这里把新写法落回库内写法。
+    **只在名字真含字形变体时回填**：`_term_key` 顺带折叠了大小写，无条件回填会把 `hiten`
+    改写成库里的 `Hiten`——那是展示名，不该被归一动作改写。
+    """
+    a = _canon_author(a)
+    if not a or _dp.fold_variants(a) == a:     # 空 / 无字形变体：不做任何回填
+        return a
+    return _term_index()["authors"].get(_term_key(a)) or a
+
 
 def _author_aliases():
     """笔名别名表：DB 权威 ∪ config 旧值（3.0 迁移后 config 对应键只读不再写回，
@@ -384,19 +405,6 @@ def _term_blacklisted(t):
         return False                            # 豁免词优先：真实社团名不因子串撞黑名单被误拦
     return any(b.lower() in tl for b in _term_blacklist())
 
-def _alias_kind(body=None):
-    """从 query/body 取 kind，只认 author|circle|original，默认 author。"""
-    v = ""
-    if body and isinstance(body, dict):
-        v = str(body.get("kind", "") or "").strip().lower()
-    if not v:
-        v = str(request.args.get("kind", "") or "").strip().lower()
-    return v if v in h()._ALIAS_KINDS else "author"
-
-def _aliases_of(kind):
-    return {"circle": _circle_aliases, "original": _original_aliases}.get(
-        kind, _author_aliases)()
-
 def _pixiv_title(name):
     """[Pixiv] 标题规则：文件名带 [Pixiv] 词条时，剥掉全部括号段后的标题文本
     视为社团名/个人名候选（Pixiv 作品标题即画师名）。返回 "" 表示无可提取。"""
@@ -438,6 +446,8 @@ def _rescue_ok(c, dis):
         return False
     if _skip_like_term(c) or _term_blacklisted(c) or c in dis:
         return False
+    if _dp.is_platform_term(c):
+        return False                            # 平台/版本标记（FANBOX、DLsite…）
     if re.fullmatch(r"[0-9\s]+", c):
         return False
     if re.match(r"(?i)^(C\d+|COMIC)", c) or ("年" in c and "月号" in c):
@@ -456,10 +466,81 @@ def _rescue_personal(name):
         return ""                       # 词条库底座未建（首扫中）：不救援，避免重入扫描
     cands = _rescue_candidates(name)
     for c in cands:                     # 已收录个人名最可信
-        pb = _canon_author(c)
-        if pb and pb in h().state.known.get("pc", {}):
+        if _canon_author(c) in h().state.known.get("pc", {}):
             return c
     return cands[0] if cands else ""
+
+def _author_has_circle(author):
+    """该作者在词条库里是否有**社团归属**（`pc`：有社团的作品里出现过的画师）。
+
+    判别力来自数据本身，而不是"这个名字存不存在"：
+      * `雲呑めお` 有 7 部作品挂在 `una casita` 名下 → 在 pc 里 → 真画师；
+      * `Wantan Meo` 只有它自己那部、且那部没有社团 → 不在 pc 里 → 孤词条。
+
+    为什么不能用"词条库里有没有这个名字"（`_resolve_bare` 那套）：首次入库时把误判的
+    名字写进了 `work_authors`，词条库又从那儿建 —— "名字存在"反过来证明"它是画师"，
+    闭环，永远改不回来。也不要改用 `artist_circles` 表：那张表只覆盖少数显式映射，
+    拿它当判据会让**所有独立画师**都被当成孤词条（实测 4 → 519 部，全挤进救援分支）。
+
+    `pc` 由 `_prime_known_registry()` 在每轮扫描前按当前库建好。
+    """
+    pb = h()._canon_author(author)
+    return bool(pb) and pb in h().state.known.get("pc", {})
+
+
+def _merge_orphan_terms(name, circle, personals, bare):
+    """孤词条归并：复合词条之外"回头认库里已有词条"的两级（3.6.166）。
+
+    用户定的归并顺序，第一段在解析层（`[社团 (画师)]` 直接给出 circle），本函数管后两段：
+
+    ① **作者本身是孤词条** → 拿标题里其余括号/方括号词条逐个比对词条库：
+       命中库内画师就认他、并按其主社团归区；命中库内社团就直接归该社团。
+    ② **作者已是已知画师，但裸词条是孤词条** → 按该画师的主社团归区。
+
+    ② 补的是 ① 管不到的那一半：① 只在"作者也是孤词条"时触发，一旦作者被修成已知
+    画师，`_author_has_circle` 立刻为真、整段跳过，**裸词条那个孤零零的归档名就永远留着**。
+    实测 `Wantan Meo` 那部：作者早已修正为 雲呑めお（8 部档案），circle 却一直为空，
+    `_bucket_by_circle` 于是继续按目录名建出 `Wantan Meo/` 这个假社团。
+
+    判据必须用"有没有社团归属"（`pc`），不能用"词条库里有没有这个名字"：首次误判时
+    这个名字已经写进 work_authors，词条库又从那儿建 —— 存在性判断会形成闭环，永远改
+    不回来。孤词条凑不出社团，是这条链上唯一没被污染的一环。
+    推不出社团就**整条不动**（宁可留待定，也不做半改：半个身份比原样更难排查）。
+
+    返回 (circle, personals, bare)。
+    """
+    if circle or len(personals) != 1 or not h().state.known.get("ready"):
+        return circle, personals, bare
+    nb = _canon_author(personals[0])
+    if nb and not h()._author_has_circle(nb):
+        found = _rescue_by_known_term(name, nb)
+        return ((found[0], [found[1]] if found[1] else personals, "") if found
+                else (circle, personals, bare))
+    if bare and not h()._resolve_bare(bare):
+        main = h()._main_circle_of(nb) if nb else ""
+        return (main, personals, "") if main else (circle, personals, bare)
+    return circle, personals, bare
+
+
+def _rescue_by_known_term(name, skip):
+    """从标题里按出现顺序找**库里已有**的社团/画师（孤词条救援的"认出是谁"这一步）。
+
+    返回 (circle, personal)：命中社团时 personal 为空（作者保持原样），命中画师时
+    两者都给出。返回 None = 没有可用的已收录词条。
+
+    画师候选额外要求 ≥2 部独立历史：只有一条记录的"画师"往往正是上一次误判的产物，
+    认了它等于把错误复制一遍。社团不设这条——社团由目录/作品建立，误判成本低得多。
+    """
+    for c in _rescue_candidates(name):
+        if _canon_author(c) == skip:
+            continue
+        r = h()._resolve_bare(c)
+        if r and r["as"] == "circle":
+            return r["name"], ""
+        if r and r["as"] == "personal" and r["circle"] and meta.author_work_count(c) >= 2:
+            return r["circle"], c
+    return None
+
 
 def _skip_like_term(b):
     """与 djc_parse._skip_term 同口径的跳过判定（汉化组/無修正/语言标记/禁漫）。"""

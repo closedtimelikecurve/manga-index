@@ -170,10 +170,18 @@ def api_pair_qr():
 
 
 def api_pair_claim():
-    """票据换设备令牌。**一次性**：同一个票据第二次一定失败。"""
+    """票据换设备令牌。**一次性**：同一个票据第二次一定失败。
+
+    3.6.162：请求可带 `m`（机器码，APP 用 ANDROID_ID）与 `t`（APP 本地已有的设备令牌）。
+    机器码已登记时**不再新建设备**：旧 token 对得上就原样返回（连 token 都不换），
+    对不上（APP 重装）则复用同一个 deviceId、只轮换 token。识别逻辑在
+    `pair_devices.issue`，这里只负责把两个可选字段递下去。
+    """
     body = request.get_json(silent=True) or {}
     ticket = str(body.get("p") or body.get("ticket") or "").strip()
     name = str(body.get("n") or body.get("name") or "").strip()
+    machine = str(body.get("m") or body.get("machine") or "").strip()
+    known = str(body.get("t") or body.get("knownToken") or "").strip()
     status, _rec = pair_tickets.claim(_state_dir(), ticket, ip=_client_ip())
     if status == "expired":
         return jsonify({"ok": False, "reason": "expired",
@@ -184,9 +192,11 @@ def api_pair_claim():
     if status != "ok":
         return jsonify({"ok": False, "reason": "unknown",
                         "message": "无效的二维码"}), 400
-    dev = pair_devices.issue(_state_dir(), name=name)
+    dev = pair_devices.issue(_state_dir(), name=name, machine=machine, known_token=known)
     return jsonify({"ok": True, "token": dev["token"], "deviceId": dev["deviceId"],
                     "deviceName": dev["name"],
+                    # true = 这台设备早就登记过，本次既没新增设备也没换 token
+                    "reused": bool(dev.get("reused")),
                     # 服务器身份 secret：APP 存下来，以后用它验证"还是这台机器"（见 attest）
                     "sk": server_identity.secret(_state_dir())})
 

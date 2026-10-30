@@ -20,6 +20,7 @@ import os
 
 from flask import send_file
 
+import common
 from panel.host import h
 
 _IMG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -28,24 +29,29 @@ SAFE_COVER_IMG = os.path.join(_IMG_DIR, "safe_cover.jpg")
 PLACEHOLDER_IMG = os.path.join(_IMG_DIR, "placeholder.png")
 
 
-def enabled():
-    """开关是否打开。CFG 里的值可能来自手写 JSON，口径与 `common._truthy` 一致。"""
-    return bool(h().CFG.get("safe_covers"))
+def enabled(scope="web"):
+    """某个端的内测模式是否打开（3.6.162 起各端独占）。
+
+    CFG 里可能是旧格式的单个布尔，也可能是新格式的分端字典——统一交给
+    `common.safe_covers_on` 归一，调用方不必关心。
+    """
+    return common.safe_covers_on(h().CFG, scope)
 
 
-def response():
+def response(scope="web"):
     """开 → 回占位封面；关 → None，调用方继续走真实封面。
 
     `Cache-Control: no-cache` 是刻意的：开关一关就得立刻看到真封面。
     配合固定 ETag，切回同一状态时仍是 304，不会反复重传。
     """
-    if not enabled():
+    if not enabled(scope):
         return None
     path = SAFE_COVER_IMG if os.path.exists(SAFE_COVER_IMG) else PLACEHOLDER_IMG
     mime = "image/jpeg" if path.lower().endswith((".jpg", ".jpeg")) else "image/png"
-    resp = send_file(path, mimetype=mime, etag="safe-covers", conditional=True)
+    resp = send_file(path, mimetype=mime, etag="safe-covers-%s" % scope, conditional=True)
     resp.headers["Cache-Control"] = "no-cache"
-    resp.headers["X-Img-Mode"] = "safe"
+    # 端写进响应头：出问题时一眼能看出"这张占位图是给哪一端切的"
+    resp.headers["X-Img-Mode"] = "safe:%s" % scope
     return resp
 
 

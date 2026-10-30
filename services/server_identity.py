@@ -56,9 +56,10 @@ def _load(state_dir):
 
 
 def _save(state_dir, data):
+    """原子写（3.6.168：临时名带 pid，双实例各写各的，详见 `pair_devices._save`）。"""
     os.makedirs(state_dir, exist_ok=True)
     path = _path(state_dir)
-    tmp = path + ".tmp"
+    tmp = "%s.%d.tmp" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(tmp, path)

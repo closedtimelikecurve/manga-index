@@ -107,7 +107,14 @@ def _index_save():
     fd = tmp = None
     try:
         with h().INDEX_LOCK:
-            alive = {k: v for k, v in h().state.index["works"].items() if k in h().state.index_keys}
+            # `index_keys` 是"本轮扫描仍然有效的键"。它**只有真正扫过**才会被填
+            # （_index_get_work/_index_put_work 各自 add）。启动时若直接复用了磁盘上的
+            # 索引、没走扫描，这个集合是空的——此时拿它过滤等于"一个都不留"，会把
+            # 整张索引写成空文件（实测重启后面板突然 0 部作品就是这么来的）。
+            # 所以只有集合非空才用它清理已删除作品，否则原样保留。
+            alive = ({k: v for k, v in h().state.index["works"].items()
+                      if k in h().state.index_keys}
+                     if h().state.index_keys else dict(h().state.index["works"]))
             h().state.index["works"] = alive
             h().state.index["originals_hash"] = h()._originals_hash()
             payload = h().state.index
@@ -117,8 +124,19 @@ def _index_save():
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False)
         fd = None
-        os.replace(tmp, h().INDEX_FILE)
-        tmp = None
+        # Windows 上 os.replace 到"正被另一个进程打开"的文件会 WinError 5（拒绝访问）。
+        # 本项目常态就是双实例（8765 本地 + 8766 远程）共存，两边都会存索引；
+        # 撞上时对方通常只是读几百毫秒，重试几次基本都能过——否则就直接丢掉这次保存，
+        # 下次重启得整库重扫（实测 30 秒~几分钟）。真的三次都失败才记异常。
+        for attempt in (1, 2, 3, 4):
+            try:
+                os.replace(tmp, h().INDEX_FILE)
+                tmp = None
+                break
+            except PermissionError:
+                if attempt == 4:
+                    raise
+                time.sleep(0.2)
     except Exception:
         h().log.exception("写入索引缓存失败（重启后需要重新扫描）")
     finally:
@@ -134,8 +152,12 @@ def _index_save():
                 pass
 
 def _work_to_cache(w):
-    c = {k: w[k] for k in ("name", "path", "kind", "pages", "page_files", "mtime",
-                           "circle", "circles", "personal", "personals", "bare", "tags")}
+    # 3.6.166：**必须带 size**。原先漏了它，缓存命中的作品 size 恒为 0，
+    # 「按文件大小排序」对历史作品整片失效（同一部作品看起来都是 0 字节）。
+    c = {k: w.get(k) for k in ("name", "path", "kind", "pages", "page_files", "mtime",
+                               "size", "circle", "circles", "personal", "personals",
+                               "bare", "tags")}
+    c["size"] = int(c.get("size") or 0)
     c["cover"] = list(w["cover"]) if w.get("cover") else None
     c["tags"] = [list(t) for t in w["tags"]]
     return c
@@ -281,6 +303,81 @@ def _apply_sole_artist_covers(groups, old_data=None):
             _unbind_circle_cover(g, old)
 
 
+def _save_scan_result(groups, ctx):
+    """落盘一段：DB 同步 → 重算「最近入库」→ 索引写盘（3.6.166 的顺序，不可换）。
+
+    `_index_save` 原先在 DB 同步**之前**，现在必须放最后：本轮新入库的作品，`added_at`
+    是 `sync_scan` 这一秒才写进 DB 的，「最近入库」得等它落地才算得准（详见 `_apply_arrivals`）。
+    """
+    if h()._ctx_stale(ctx):
+        # 3.6.10：扫描用的还是旧路径的库，写盘目标却已换成另一套 → 一律不落盘。
+        # 只更新内存缓存（对生产无害：配置变更本身会触发新的 _lib_touch/_kick_rescan）。
+        h().log.warning("重扫上下文已变，放弃落盘以免写穿：%s -> %s", ctx, h()._scan_ctx())
+        return
+    try:
+        h().meta.sync_scan(groups)   # 3.0 双轨：扫描结果 upsert 进元数据库（用户附加事实只存 DB）
+        h()._merge_manual_originals(groups)   # 3.6.38 #36：manual 标签回填 state.lib
+        _stamp_added_at(groups)      # 3.6.111：added_at（首次入库时间）回填 state.lib
+    except Exception:
+        h().log.exception("meta.sync_scan 失败（评分/进度同步可能中断）")
+    _apply_arrivals(groups)
+    h()._index_save()
+
+
+def _apply_arrivals(groups):
+    """DB 同步**之后**重算「最近入库」并记账（3.6.166）。
+
+    为什么必须在这一步：本轮新入库的作品，`added_at` 是 `sync_scan` 这一秒才写进 DB 的。
+    扫描阶段（`build_group`）拿不到它，只能退回**文件 mtime**——而 mtime 只说明内容什么时候
+    生成，说明不了什么时候进的库：从别处复制、下载工具保留服务器时间、从压缩包里解出来，
+    都会让刚入库的作品顶着很旧的文件时间，分区于是沉到列表末尾（用户报障场景，已用
+    `test_new_circle_with_old_file_time_still_sorts_first` 复现）。
+
+    首次建库（按文件时间排序）与之后（按入库时间）的分界就是这里：`build_group` 只算临时值、
+    不记账（`commit=False`），记账一律在这——所以第一轮扫描结束后 `groups` 才有记录，
+    从第二轮起"数量涨了才算新增"这条判据才成立。
+    """
+    for g in groups:
+        try:
+            g["updated_at"] = h()._group_arrival(
+                g["name"], g.get("works") or [],
+                g.get("created_at", 0.0), g.get("cover_mtime", 0.0),
+                real_dir=g.get("_real_dir", True))
+        except Exception:                           # noqa: BLE001 —— 单个社团算不出来不影响扫描
+            h().log.exception("重算「最近入库」失败：%s", g.get("name"))
+
+
+def _verify_cover_coords(groups):
+    """社团封面坐标校验：指向的作品找不回来时，退回该社团自己的派生封面（3.6.166）。
+
+    社团封面**允许**取自别的社团——单画师社团跟随"画师页口径"，用的是画师名下体积最大
+    的作品，那部完全可能在别的社团（实测 746 个社团里 27 个如此）。所以 `cover_group ≠ name`
+    本身是正常的，`find_work` 也有按真实归档目录反查的兜底（3.6.13）。
+
+    但坐标会**悬空**：那部作品被删、改名、或移出文库之后，`cover_group/cover_work` 仍然
+    留在 `library_index.json` 的 groups 里被逐轮沿用——于是 `/cover` 恒定 404、卡片一片空白，
+    而且永远不会自愈。归并、目录整理做得越多，撞上的概率越高，所以每轮扫描末尾验一次。
+
+    回退目标是 `build_group` 留底的 `_derived_cover`（本社团自己的封面），不是"没封面"——
+    后者会让卡片变成占位图标，用户会以为作品丢了。
+    """
+    fixed = 0
+    for g in groups:
+        w = g.get("cover_work")
+        if not w:
+            continue
+        if h().find_work(g.get("cover_group") or g["name"], w["name"]):
+            continue
+        dname, dgroup = g.get("_derived_cover") or ("", "")
+        obj = h().find_work(dgroup or g["name"], dname) if dname else None
+        g["cover_work"], g["cover_group"] = obj, (dgroup or g["name"]) if obj else None
+        g.pop("follow_artist", None)        # 绑定已失效，别再拿它当"跟随中"来解绑快照
+        g.pop("follow_cover", None)
+        fixed += 1
+    if fixed:
+        h().log.info("社团封面坐标悬空，已退回派生封面：%d 个", fixed)
+
+
 def _backfill_work_originals(g, w, by_key):
     """把该作品在 DB 里的 manual original 标签并进 w["tags"]；有变化返回 True。
 
@@ -307,13 +404,58 @@ def _backfill_work_originals(g, w, by_key):
 _SCAN_TLS = threading.local()
 
 
+def _pc_from_index():
+    """索引里的「画师 → 有社团归属的作品所属社团」集合（`pc` 的构建口径）。
+
+    只有**挂在某个社团下**的作品才产生归属依据：无社团的作品不说明任何事，
+    正是"孤词条"的定义。
+    """
+    pc = {}
+    for w in (h().state.index.get("works") or {}).values():
+        circle = str(w.get("circle") or "").strip()
+        if not circle:
+            continue
+        for a in (w.get("personals") or ([w.get("personal")] if w.get("personal") else [])):
+            if a:
+                pc.setdefault(h()._canon_author(a), set()).add(circle)
+    return pc
+
+
+def _prime_known_registry():
+    """扫描**开始前**把词条库底座建好（3.6.165）。
+
+    它原先只在 `_known_learn` / `_known_circle_of` 里按需初始化，而扫描是逐部作品往下走的：
+    排在前面、又没触发这两条路径的作品，遇到"孤词条救援"时 `known["ready"]` 还是 False，
+    救援整段被跳过——修复写了却从不生效（Wantan Meo 反复验证都改不过来就是这个）。
+
+    **直接用已加载的索引建，不走 `get_library()`**：首扫时 `lib["data"]` 还是 None，
+    走它就会重入扫描（`_SCAN_TLS` 守着的那条），拿到的还是空库。索引里本来就有
+    circle/personals，够建 pc 了——而 pc 只需要"哪些画师有社团归属"这一条事实。
+    """
+    if h().state.known["ready"]:
+        return
+    pc = _pc_from_index()
+    if not pc:
+        # 索引里一条都没有（首扫 / 归一逻辑版本变了整表作废）→ 改从 DB 的词条索引取。
+        # 不这么做就等于整轮扫描都没有 pc：`_merge_orphan_terms` 第一行就返回原样，
+        # 孤词条一个也认不出来（实测：升级 3.6.166 后索引重算那一轮，Wantan Meo 那部
+        # 明明条件全对却纹丝不动）。`_term_index` 的 main 是"画师 → 作品数最多的社团"，
+        # 由 works.circle 反推，语义与这里的 pc 完全一致，且不碰 LIB（不会重入扫描）。
+        pc = {a: {c} for a, c in (h()._term_index().get("main") or {}).items()}
+    if not pc:
+        return                                        # 空库（首装）：等真扫出来再说
+    h().state.known["pc"] = pc
+    h().state.known["circles"] = {c for cs in pc.values() for c in cs}
+    h().state.known["ready"] = True
+
+
 def _do_scan(ctx=None):
     """执行一轮全量扫描并替换 state.lib["data"]（调用方必须已持有 SCAN_LOCK）。
     get_library（阻塞路径）与 _kick_rescan（后台路径）共用。
     ctx=None → 同步路径，正常写盘；ctx=快照 → 后台路径，先校验上下文未变再写盘，
     变了就只更新内存缓存、放弃落盘（避免跨异步边界写穿到另一套库，见 _scan_ctx）。"""
     h()._index_load()
-    h()._term_index(force=True)     # 3.6.12：每轮扫描刷新一次待定词条印证索引
+    h()._term_index(force=True); h()._prime_known_registry()   # 刷新待定词条印证 + 建词条库（3.6.165）
     with h().INDEX_LOCK:
         # 词条库（originals）变化 → 解析结果可能变化 → 作废全部缓存（含本次进程内存态）
         if h().state.index.get("originals_hash") != h()._originals_hash():
@@ -332,19 +474,7 @@ def _do_scan(ctx=None):
             "scan_ms": int((time.time() - t0) * 1000),
             "scanned_at": time.time(),
         }
-        if h()._ctx_stale(ctx):
-            # 3.6.10：扫描用的还是旧路径的库，写盘目标却已换成另一套 → 一律不落盘。
-            # 只更新内存缓存（对生产无害：配置变更本身会触发新的 _lib_touch/_kick_rescan）。
-            h().log.warning(
-                "重扫上下文已变，放弃落盘以免写穿：%s -> %s", ctx, h()._scan_ctx())
-        else:
-            h()._index_save()
-            try:
-                h().meta.sync_scan(groups)   # 3.0 双轨：扫描结果 upsert 进元数据库（用户附加事实只存 DB）
-                h()._merge_manual_originals(groups)   # 3.6.38 #36：manual 标签回填 state.lib
-                _stamp_added_at(groups)      # 3.6.111：added_at（首次入库时间）回填 state.lib
-            except Exception:
-                h().log.exception("meta.sync_scan 失败（评分/进度同步可能中断）")
+        _save_scan_result(groups, ctx)
         old_data = h().state.lib["data"]        # 上一轮 LIB（跨轮恢复绑定状态用）
         with h().LIB_LOCK:
             h().state.lib["data"] = data
@@ -353,6 +483,7 @@ def _do_scan(ctx=None):
         # _do_scan 期间 LIB 为空，sole-artist 跟随的 find_work 会全部落空。
         # old_data = 上一轮 LIB：跨轮恢复绑定状态（force 重扫的 groups 是全新 dict）。
         _apply_sole_artist_covers(groups, old_data)
+        _verify_cover_coords(groups)    # 3.6.166：绑定后的坐标再验一次，悬空的退回派生封面
         return data
     finally:
         _SCAN_TLS.active = False

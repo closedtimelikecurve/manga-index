@@ -281,7 +281,7 @@ def _download_nh(aid, on_progress=None):
         import importlib
         ND = importlib.import_module("crawlers.crawl_nh_direct")
         auth = ND._nh_credential()
-        gid, meta, _via = ND.resolve_entry(str(aid), 0.60)
+        gid, meta = ND.resolve_entry(str(aid), 0.60)
         title = ND.gallery_title(meta)
         zpath, _pages, reason = ND._fetch_zip(gid, meta, title, auth,
                                               on_progress=on_progress)

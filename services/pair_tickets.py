@@ -70,10 +70,14 @@ def _load(state_dir):
 
 
 def _save(state_dir, data):
-    """原子写：先写 .tmp 再 os.replace，避免另一个实例读到半个文件。"""
+    """原子写：先写 **本进程独占** 的 .tmp 再 os.replace，避免另一个实例读到半个文件。
+
+    临时名带 pid（3.6.168）：8765/8766 双实例都在 claim/清理时写这张表，
+    固定 `.tmp` 名会让两边互相截断——同 `pair_devices._save` 的坑。
+    """
     os.makedirs(state_dir, exist_ok=True)
     path = _store_path(state_dir)
-    tmp = path + ".tmp"
+    tmp = "%s.%d.tmp" % (path, os.getpid())
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False)
     os.replace(tmp, path)

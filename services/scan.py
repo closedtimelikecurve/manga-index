@@ -31,6 +31,9 @@ def _normalize_identity(name, parsed, path):
         rescued = h()._rescue_personal(name)
         if rescued:
             personals = [rescued]           # 词条救援：后续括号里的已知个人名顶上
+    # 3.6.166：孤词条归并——作者是孤词条就回头认标题里其它已知词条；作者已是已知画师
+    # 但裸词条是孤词条，就按该作者的主社团归区（两级都要求能推出社团，否则不动）。
+    circle, personals, bare = h()._merge_orphan_terms(name, circle, personals, bare)
     circle, personals, bare, loose_group = _resolve_bare_identity(circle, personals, bare, path)
     if circle:
         # 3.6.12：圈子名折叠分隔符变体（TOZAN_BU / TOZAN：BU / TOZANBU / TOZAN-BU …），
@@ -40,9 +43,14 @@ def _normalize_identity(name, parsed, path):
 
 
 def _identity_personals(parsed):
-    """作者列表：逐位笔名归一，丢掉空串与黑名单词条（`A & B` 已在解析层拆开）。"""
+    """作者列表：逐位笔名归一，丢掉空串与黑名单词条（`A & B` 已在解析层拆开）。
+
+    3.6.173：走 `_canon_author_resolved` 而不只是 `_canon_author` —— 后者只折下划线与
+    别名，字形变体（JM 台湾繁体「南濱」vs 日文「南浜」）仍是两个画师；前者会回填库里
+    已有的写法，同一人的作品才不会被一个字劈成两档。
+    """
     raw = parsed.get("personals") or ([parsed["personal"]] if parsed["personal"] else [])
-    canon = [h()._canon_author(a) for a in raw]
+    canon = [h()._canon_author_resolved(a) for a in raw]
     return [a for a in canon if a and not h()._term_blacklisted(a)]
 
 
@@ -75,7 +83,11 @@ def _resolve_bare_identity(circle, personals, bare, path):
 def _reresolve_cached_work(hit, name):
     """增量缓存命中：页枚举/封面很贵（要开压缩包/遍历目录），复用缓存里的 page_files/cover；
     但 circle/bare/personals/tags 这些**身份字段必须按当前逻辑重算**——否则 library_index.json
-    里 3.6.12 修复前的旧值会原样返回，绕过词条归一/待定印证（TOZAN-BU 等归一失效就是这么来的）。"""
+    里 3.6.12 修复前的旧值会原样返回，绕过词条归一/待定印证（TOZAN-BU 等归一失效就是这么来的）。
+
+    3.6.166：重算结果由调用方 `_index_put_work` **回写索引**。此前只在内存里生效，
+    索引文件永远停在首次入库时的身份——于是"修了逻辑、重扫、重启，索引里还是旧值"，
+    排查时看到的一直是假象（Wantan Meo 反复"改不过来"有一半是这么来的）。"""
     path = str(hit.get("path") or "")
     kind = hit.get("kind") or "archive"
     parsed = h().parse_filename(os.path.basename(path), h().state.originals, h().state.norm_to_canon)
@@ -85,6 +97,9 @@ def _reresolve_cached_work(hit, name):
         "pages": hit.get("pages", 0), "cover": hit.get("cover"),
         "page_files": hit.get("page_files") or [],
         "mtime": hit.get("mtime", 0),
+        # 3.6.166：旧索引没有 size（`_work_to_cache` 漏存），命中缓存时按已有 page_files
+        # 就地补一次；补出来的值会随本次 _index_save 落盘，之后不再重算。
+        "size": int(hit.get("size") or 0) or h()._cached_size(kind, path, hit.get("page_files") or []),
         "circle": circle, "circles": circles, "personal": (personals[0] if personals else ""),
         "personals": personals, "bare": bare,
         "tags": parsed["tags"],
@@ -177,7 +192,9 @@ def _prepare_archive(path, name):
     ikey = f"a|{st.st_mtime_ns}|{st.st_size}|{path}"
     hit = h()._index_get_work(ikey)
     if hit is not None:
-        return h()._reresolve_cached_work(hit, name), None, [], [], []
+        w = h()._reresolve_cached_work(hit, name)
+        h()._index_put_work(ikey, w)      # 重算结果回写（见 _reresolve_cached_work 注释）
+        return w, None, [], [], []
     ext = os.path.splitext(path)[1].lower()
     page_files = h()._archive_page_entries(path) if ext in h().ARCHIVE_EXTS else []
     return None, ikey, [], [(os.path.basename(path), path)], page_files
@@ -199,7 +216,9 @@ def _prepare_folder(path, name):
     ikey = f"f|{sig}|{path}"
     hit = h()._index_get_work(ikey)
     if hit is not None:
-        return h()._reresolve_cached_work(hit, name), None, [], [], []
+        w = h()._reresolve_cached_work(hit, name)
+        h()._index_put_work(ikey, w)
+        return w, None, [], [], []
     return None, ikey, images, archives, [{"p": p} for _rel, p in images]
 
 
@@ -317,16 +336,28 @@ def build_group(name, works, dir_path=None):
         # 记下"当前 0 部作品"：这样这个社团将来第一次入库作品时能被判为"新增"（n 从 0 涨到 1）
         return {"name": name, "works": [], "cover_work": None, "cover_mtime": 0.0,
                 "latest_work": "", "created_at": created, "total_bytes": 0,
-                "updated_at": h()._group_arrival(name, [], created, 0.0)}
+                "_real_dir": bool(dir_path),
+                "updated_at": h()._group_arrival(name, [], created, 0.0, commit=False,
+                                                 real_dir=bool(dir_path))}
     works.sort(key=lambda w: h().natural_key(w["name"]))
     latest = max(works, key=lambda w: w["mtime"])
     cover_work, cover_group = _cover_for_group(name, works, latest)
     created = _group_created(dir_path, works)
-    arrival = h()._group_arrival(name, works, created, latest["mtime"])
+    arrival = h()._group_arrival(name, works, created, latest["mtime"], commit=False,
+                                 real_dir=bool(dir_path))
     return {
         "name": name, "works": works,
+        # 3.6.169：真实目录 vs 根目录散包拼出来的虚拟社团。只有前者才谈得上"分区成立时间"，
+        # `_arrival_seed` 用它决定要不要拿 circles.created_at 兜底（散包的 created 本身就是
+        # 作品文件 ctime，兜底等于退回内容时间）。内部字段，public_group 白名单不外泄。
+        "_real_dir": bool(dir_path),
         "cover_work": cover_work,
         "cover_group": cover_group,
+        # 3.6.166：派生封面坐标留底。封面可以被"单画师社团跟随画师页口径"改成别的社团的
+        # 作品（cover_group ≠ name），一旦那个坐标悬空（作品被删/改名/移出文库），
+        # `_verify_cover_coords` 就靠这一份退回本社团自己的封面。下划线前缀 = 内部字段，
+        # public_group 是白名单，不会外泄。
+        "_derived_cover": ((cover_work["name"] if cover_work else ""), cover_group or ""),
         "cover_mtime": latest["mtime"],      # 内容最新（封面/"最新：X" 用），不参与排序
         "latest_work": latest["name"],
         "created_at": created,
@@ -498,7 +529,11 @@ def _scan_dir_entry(e, raw):
         return
     for circ, ws in _bucket_by_circle(works, e.name).items():
         if circ:
-            raw.append((circ, ws, None))       # 虚拟社团档案（按圈子归）
+            # 3.6.169：词条与**目录同名**时它就是本目录的正名，目录信息不能丢。
+            # 从前一律 `None`，于是「漫画喫茶瀬戸」这种标准 `[社团 (画师)]` 命名的目录
+            # 也被当成"虚拟社团档案"：`_real_dir=False`、「最近入库」拿不到分区成立时间，
+            # 三个 10-29 新建的分区里就它一个卡在 10-22 没被修正。
+            raw.append((circ, ws, e.path if circ == e.name else None))
         else:
             raw.append((e.name, ws, e.path))
 

@@ -29,8 +29,12 @@ from panel.text import (                                              # noqa: E4
     strip_wrappers, repair_name, _dedup, _clean_title, _norm,
 )
 from panel.terms import (                                             # noqa: E402,F401
-    DEFAULT_ORIGINALS, GROUP_KEYWORDS, is_group_term, load_originals, _skip_term,
+    DEFAULT_ORIGINALS, GROUP_KEYWORDS, is_group_term, is_platform_term,
+    load_originals, _skip_term,
 )
+# 字形折叠（繁/日文新字体 → 简体）统一放在 panel/variants.py：3.6.173 起它还负责
+# "同一社团被 JM 繁体与日文原名劈成两档"这条，表在那里维护、加字只需一行。
+from panel.variants import fold as fold_variants                      # noqa: E402
 
 # ---- 词条规范化键（3.6.156 从 crawlers/wnacg_text.py 下沉）----
 # services/crawl_dup 等管理层代码也用它做去重比对——文本折叠是中性解析能力，
@@ -38,6 +42,10 @@ from panel.terms import (                                             # noqa: E4
 _PUNCT = ('[]()（）【】「」『』・·。.，,～~〜!！?？♡♥♪☆★×+:：;；|｜／/\\—_-'
           '"\'“”‘’')
 
+# ⚠ 方向是「简体 → 日文/繁体」，**只给 wnacg 搜索变体用**（wnacg_match 拿它把简体标题
+# 转成站点上的日文写法再试一轮：调查→調査、时间→時間）。它和 `panel.variants.fold`
+# （繁/日 → 简，用于身份比对键）方向相反、职责不同，**不要合并**——把这里改成简体会让
+# 那个搜索变体静默失效（不再报错，只是再也没有第二轮查询）。
 _VARIANT_MAP = str.maketrans({"宫": "宮", "乐": "楽", "经": "経", "译": "訳",
                               "变": "変", "实": "実", "满": "満", "传": "伝",
                               "查": "査", "时": "時", "调": "調", "亚": "亜",
@@ -50,7 +58,7 @@ def _norm_key(s):
     import unicodedata
     s = unicodedata.normalize("NFKC", str(s)).lower()
     s = re.sub(r"\s+", "", s)
-    s = s.translate(_VARIANT_MAP)          # 常见简繁/日中字形折叠（宫/宮、乐/楽…）
+    s = fold_variants(s)                   # 字形折叠（宫/宮、浜/濱/滨…）
     return s.translate(str.maketrans("", "", _PUNCT))
 
 

@@ -59,7 +59,17 @@ $('#grid').addEventListener('click', e => {
   const inboxInfo = e.target.closest('[data-act="inbox-info"]');
   if (inboxInfo) { openInfo('收件箱', inboxInfo.dataset.id); return; }   // 补全词条后即可自动识别社团；收件箱=真实社团名 i18n:data
   const circle = e.target.closest('.circle-card');
-  if (circle) { location.hash = '#/circle/' + enc(circle.dataset.group); return; }
+  if (circle) {
+    // 3.6.170 修正：分区视图（全部画师 / 同人分区 / 喜爱）的卡片**也是** `.circle-card`
+    // （复用同一套样式），但它们没有 `dataset.group`，只有 `dataset.artist` / `dataset.original`。
+    // 这里从前无条件 `location.hash = '#/circle/' + enc(circle.dataset.group)`，
+    // 于是点画师卡/同人卡会跳到 `#/circle/undefined` → 前端找不到该社团 → 踢回首页，
+    // 表现就是「画师页和同人分区点不进去」（APP 是原生渲染，所以只有网页端有）。
+    // 现在按卡上的标识分派，社团卡行为不变。
+    if (circle.dataset.group) { location.hash = '#/circle/' + enc(circle.dataset.group); return; }
+    if (circle.dataset.artist) { location.hash = '#/artist/' + enc(circle.dataset.artist); return; }
+    if (circle.dataset.original) { location.hash = '#/tag/original/' + enc(circle.dataset.original); return; }
+  }
   // 3.7.10 续读页等区域内的 .rec-card 也渲染在 #grid 里（原先只有首页 #recRow 有委托，
   // 续读页卡片点击无反应——顺手修复）：点击即继续阅读
   const rec = e.target.closest('.rec-card');

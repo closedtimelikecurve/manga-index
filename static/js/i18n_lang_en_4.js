@@ -33,5 +33,13 @@ Object.assign(I18N_PACKS['en'], {
   "内测模式：所有封面统一换成占位图（截图 / 录屏用，不动任何文件）": "Safe covers: replace every cover with one placeholder image (for screenshots or screen recording; no files are touched)",
   "内测模式已开启：封面已换成占位图": "Safe covers on: every cover now shows the placeholder",
   "内测模式已关闭": "Safe covers off",
+  "内测模式已开启：封面已换成占位图（仅网页）": "Safe covers on: every cover now shows the placeholder (web only)",
+  "内测模式已关闭（仅网页）": "Safe covers off (web only)",
   "切换失败": "Switch failed",
+  "新建一个空的同人分区（之后在分区里「＋ 添加作品」补作品）": "Create an empty doujin zone (add works later with “＋ Add works” inside the zone)",
+  "新建分区": "New zone",
+  "建一个空的同人分区": "Create an empty zone",
+  "新建同人分区：输入分区名（先建一个空分区，之后在分区里点「＋ 添加作品」补作品）": "New doujin zone: enter a name (an empty zone is created first; add works inside it afterwards with “＋ Add works”)",
+  "分区「%1」已存在": "Zone “%1” already exists",
+  "已新建分区「%1」": "Created zone “%1”",
 });

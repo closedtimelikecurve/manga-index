@@ -142,10 +142,20 @@ def test_first_scan_seeds_from_work_time_not_dir(env):
     历史：3.6.111 起用档案创建时间初始化，导致 updatedAt 与 createdAt 恒等，
     「最近入库」与「创建时间」排出来一模一样（3.6.151 改为优先取 DB 的 added_at，
     DB 里没有记录时才走这条退路）。"""
+    # 首扫 = "首次建库回填"：清掉标记，让 db_sync 按历史近似（文件 mtime）写 added_at。
+    # 不这么做的话，同一个测试库里前面的用例已经打过标，新作品会按"首次见到时刻"记，
+    # 这条就测不到回填分支了。
+    with sqlite3.connect(meta_store.DB_PATH) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS meta_kv(k TEXT PRIMARY KEY, v TEXT)")
+        db.execute("DELETE FROM meta_kv WHERE k='backfill_done'")
+        db.commit()
+    app.state.index["works"] = {}
+    app.state.index["groups"] = {}
     app.get_library(force=True)
     c = app.app.test_client()
     for g in _groups(c).values():
-        assert g["updatedAt"] == g["coverMtime"], g["name"]
+        # DB 里的 added_at 是整秒，coverMtime 是浮点——按整秒比
+        assert int(g["updatedAt"]) == int(g["coverMtime"]), (g["name"], g["updatedAt"], g["coverMtime"])
     assert "groups" in app.state.index and set(app.state.index["groups"]) >= {"甲社", "乙社"}
 
 
@@ -196,3 +206,76 @@ def test_prune_drops_vanished_circles(env):
     os.rmdir(str(env["乙社"]))
     app.get_library(force=True)
     assert "乙社" not in app.state.index.get("groups", {})
+
+def test_new_circle_sorts_first(env):
+    """新作品建出一个**全新分区** → 必须排到「最近入库」最前面（用户报障场景）。"""
+    app.get_library(force=True)
+    c = app.app.test_client()
+    d = env["root"] / "丙社"
+    d.mkdir()
+    with zipfile.ZipFile(str(d / "[丙社] 新作品.zip"), "w") as z:
+        z.writestr("01.jpg", b"fake-image-bytes")
+    app.get_library(force=True)
+    names = [x["name"] for x in c.get("/api/library?sort=updated&order=desc").get_json()["groups"]]
+    assert names[0] == "丙社", names[:3]
+
+
+def test_new_circle_with_old_file_time_still_sorts_first(env):
+    """文件 mtime 是**旧的**（从别处复制/下载工具保留服务器时间），但它确实是刚入库的。
+
+    「最近入库」认的必须是**入库时间**而不是文件时间——文件时间只说明"这个文件的
+    内容是什么时候生成的"，说明不了"它什么时候进的库"。
+    """
+    app.get_library(force=True)
+    c = app.app.test_client()
+    d = env["root"] / "丁社"
+    d.mkdir()
+    zp = d / "[丁社] 老文件新入库.zip"
+    with zipfile.ZipFile(str(zp), "w") as z:
+        z.writestr("01.jpg", b"fake-image-bytes")
+    os.utime(str(zp), (OLD, OLD))          # 文件名时间回拨到"很久以前"
+    app.get_library(force=True)
+    names = [x["name"] for x in c.get("/api/library?sort=updated&order=desc").get_json()["groups"]]
+    assert names[0] == "丁社", names[:3]
+
+
+def test_new_partition_with_backfilled_added_at_uses_partition_birth(env):
+    """新分区 + 从别处移进来的老作品：`added_at == 文件 mtime` 时它不可信，要用分区成立时间。
+
+    事故（2026-10-29 用户报障「WASABI 能排那么靠前，今天才设的三个分区却在后面」）：
+    首建库回填把文件 mtime 直接抄进了 `added_at`，之后把老作品移进新目录
+    （`_adopt_work_path` 保留 added_at），三个 10-29 新建的分区就卡在 10-22，
+    排在 10-25 的 WASABI 后面。
+
+    这里复刻那个形状：分区刚建（`circles.created_at` = 现在），作品是老文件
+    （mtime 与 added_at 都是 OLD，两值相等 = 回填的记号）。
+    """
+    app.get_library(force=True)                       # 首扫：circles 记下分区成立时间
+    c = app.app.test_client()
+    d = env["root"] / "戊社"
+    d.mkdir()
+    zp = d / "[戊社] 老作品新分区.zip"
+    with zipfile.ZipFile(str(zp), "w") as z:
+        z.writestr("01.jpg", b"fake-image-bytes")
+    app.get_library(force=True)
+
+    # 把作品时间整体回拨成"很久以前"，added_at 与 mtime 同时改成同一个值（回填形状）
+    os.utime(str(zp), (OLD, OLD))
+    with sqlite3.connect(meta_store.DB_PATH) as db:
+        db.execute("UPDATE works SET added_at=?, mtime=? WHERE group_name='戊社'",
+                   (int(OLD), int(OLD)))
+        db.commit()
+    app.state.index["works"] = {}                     # 索引缓存也要重算（否则沿用旧 mtime）
+    app.state.index["groups"] = {}                    # 模拟"这个分区索引里还没有"→ 走初始化分支
+    # 其余分区都摆成很久以前入库（3.6.154：时间档按整秒比较，同秒会按名称补位，
+    # 不这么做"新分区排第一"就测不出来）
+    for name, cnt in ((k, v["workCount"]) for k, v in _groups(c).items() if k != "戊社"):
+        app.state.index.setdefault("groups", {})[name] = {"n": cnt, "at": OLD}
+    app.get_library(force=True)
+
+    g = _groups(c)["戊社"]
+    assert g["updatedAt"] > OLD + 86400, "回填的 added_at（=文件时间）被当成入库时间了"
+    assert abs(g["updatedAt"] - time.time()) < 600, "应当取分区成立时间（刚建）"
+    names = [x["name"] for x in c.get("/api/library?sort=updated&order=desc").get_json()["groups"]]
+    assert names[0] == "戊社", names[:3]
+

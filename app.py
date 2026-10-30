@@ -80,7 +80,7 @@ sys.dont_write_bytecode = True
 #      （新增字段不算）。
 # VERSION 文件与本常量同源（面板版本），启动器标题读它。
 # ---------------------------------------------------------------
-PANEL_VERSION = "3.6.161"
+PANEL_VERSION = "3.6.175"
 APP_VERSION = PANEL_VERSION      # 历史名兼容（曾用于"全系统一个号"，现仅代表面板版本）
 SERVER_API_LEVEL = 1
 MIN_APP_API = 1
@@ -130,7 +130,7 @@ from panel.deps import PIL_OK, PILImage, RAR_AVAILABLE, rarfile            # noq
 from panel.paths import (                                                  # noqa: E402
     IMAGE_EXTS, VIDEO_EXTS, ANIM_EXTS, PAGE_EXTS, ARCHIVE_EXTS, MAX_DEPTH,
     natural_key, media_kind, is_image_name, scan_images_and_archives, _entry_size,
-    list_zip_images, list_rar_images, work_mtime, _archive_page_entries,
+    list_zip_images, list_rar_images, work_mtime, _archive_page_entries, _cached_size,
     page_media_name, mime_for, _is_root_loose)
 
 # ---- 压缩包句柄 / 页缓存 / 视频临时文件（抽至 panel/archive.py）----
@@ -232,7 +232,7 @@ SAFE_IMAGES = False
 # 3.6.151：删 touched（最近更新）档、加 size（占用空间，查重用）。
 # 本表必须与 services/group_order.sort_groups 的分支一一对应——不在表里的 sort 参数
 # 会被路由**静默**当成 updated（前端点了「文件大小」，拿到的却是入库时间排序）。
-GROUP_SORTS = ("updated", "created", "count", "size")
+GROUP_SORTS = ("updated", "created", "count")   # 3.6.166：size 档已删（大小只在分区内按作品排）
 
 
 # ---------------------------------------------------------------
@@ -375,6 +375,28 @@ def _mutate_gate_end(exc):
         SCAN_LOCK.release()
 
 
+_AUTH_401_AT = 0.0       # 401 诊断日志的节流时钟（60 秒最多一条，免得图片请求刷屏）
+
+
+def _auth_reject(given):
+    """鉴权失败时留一条可查的痕迹（3.6.168）。
+
+    2026-10-29 的故障是"设备令牌明明还在手机里、所有设备却恒定 401"，而日志里
+    **一个字都没有**——拒绝请求走得完全安静，人只能靠猜。这里记下"谁、要什么、
+    有没有带令牌、像不像设备令牌"，下次一眼能分出两种完全不同的病因：
+    链路根本没带令牌（`无`）／服务端设备表认不出（`设备令牌` 却仍被拒）。
+    """
+    global _AUTH_401_AT
+    now = time.time()
+    if now - _AUTH_401_AT < 60:
+        return
+    _AUTH_401_AT = now
+    from services import netaddr
+    who = netaddr.real_client(request.remote_addr, request.headers.get("X-Forwarded-For"))
+    kind = "无" if not given else ("设备令牌" if given.startswith("dev-") else "非设备令牌")
+    log.warning("鉴权拒绝：%s %s ← %s（携带：%s）", request.method, request.path, who, kind)
+
+
 @app.before_request
 def _token_gate():
     """远程访问鉴权：主令牌 **或** 设备令牌，其余一律拒绝。
@@ -411,6 +433,7 @@ def _token_gate():
     if device_id:
         pair_devices.touch(common.STATE_DIR, device_id)   # 最近使用时间，5 分钟节流写盘
         return None
+    _auth_reject(given)
     return jsonify({"ok": False, "message": "需要访问令牌（X-Token）或已配对设备"}), 401
 
 
@@ -466,7 +489,7 @@ from services.coop import _coop_primary, _work_coop_circles, _build_coop_groups 
 # ---- index_cache（3.6.60 Stage7；再导出保持 app.* 命名面）----
 from services.index_cache import (  # noqa: E402
     _lib_touch, _scan_ctx, _ctx_stale,
-    _kick_rescan, _originals_hash, _index_load,
+    _kick_rescan, _originals_hash, _index_load, _prime_known_registry,
     _index_save, _work_to_cache, _work_from_cache,
     _index_get_work, _index_put_work, _merge_manual_originals,
     _do_scan, get_library,
@@ -485,7 +508,7 @@ from services.opener import (  # noqa: E402
 )
 # ---- appenv（Stage7 抽至 services/appenv.py；再导出保持 app.* 命名面）----
 from services.appenv import (  # noqa: E402
-    setup_logging, config_payload, _browser_open_suppressed,
+    setup_logging, config_payload, _browser_open_suppressed, client_scope,
 )
 # ---- server（Stage7 抽至 services/server.py；再导出保持 app.* 命名面）----
 from services.server import (  # noqa: E402
@@ -496,14 +519,18 @@ from services.manage import (  # noqa: E402
     _path_in_root, _path_same_or_under, _purge_circle_dir,
     _split_work_name, _work_group_name, _resolve_archive_term,
     _apply_rename, _merge_circle_into, _clean_empty_dirs,
+    _same_path, _same_size_file, _same_content,
 )
 from services.identity import (  # noqa: E402
     _canon_circle, _registry_from_lib, _term_key, _term_index,
     _main_circle_of, _canon_circle_resolved, _resolve_bare, _author_aliases,
     _circle_aliases, _original_aliases, _canon_circle_name, _canon_author,
+    _canon_author_resolved,
     _ensure_known_registry, _known_learn, _dissolved_circles, _term_whitelist,
-    _term_blacklist, _term_blacklisted, _alias_kind, _aliases_of,
-    _pixiv_title, _rescue_candidates, _rescue_personal, _skip_like_term,
+    _term_blacklist, _term_blacklisted,
+    _pixiv_title, _rescue_candidates, _rescue_personal, _merge_orphan_terms,
+    _author_has_circle,
+    _skip_like_term,
     resolve_bare_term,
 )
 from services.originals import (                                          # noqa: E402

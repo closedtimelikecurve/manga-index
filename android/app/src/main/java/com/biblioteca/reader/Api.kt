@@ -1,5 +1,6 @@
 package com.biblioteca.reader
 
+import androidx.compose.runtime.mutableStateOf
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
@@ -43,8 +44,16 @@ object Api {
      * 3.7.110 内测模式：所有封面换成占位图（服务端 panel/safecover.py 统一替换）。
      * 服务端是唯一事实源——这里只是本地镜像，抽屉开关按它显示位置，封面 URL 按它加
      * `&sc=1`（换缓存键，否则 Coil 会继续用内存里的旧封面）。
+     *
+     * 3.7.112：改用 Compose State 承载。原先它是普通静态变量，**不参与快照订阅**——
+     * `coverUrl()` 读它时不会建立依赖，开关一变，只有"碰巧因别的原因重组"的那些
+     * Composable 才重算 URL，其余仍拿着旧 URL 显示旧图，表现就是"部分作品封面没换"。
+     * 换成 mutableStateOf 之后，凡是调过 coverUrl 的 Composable 都会自动重组。
      */
-    var safeCovers: Boolean = false
+    private val safeCoversState = mutableStateOf(false)
+    var safeCovers: Boolean
+        get() = safeCoversState.value
+        set(v) { safeCoversState.value = v }
 
 
     internal val http: OkHttpClient = OkHttpClient.Builder()
@@ -65,6 +74,10 @@ object Api {
 
     internal fun req(path: String): Request.Builder {
         val b = Request.Builder().url(url(path))
+        // 3.7.111：声明"这是 APP"。服务端按这个头区分端——内测模式已改为各端独立
+        // （网页开了不该连带手机一起遮），封面出口要据此取各自那一端的开关。
+        // 浏览器不会发这个头，服务端默认算 web，所以网页侧不需要改。
+        b.header("X-Client", "app")
         if (token.isNotEmpty()) b.header("X-Token", token)
         return b
     }
@@ -171,8 +184,12 @@ object Api {
         // 社团排序用（秒，与服务端 createdAt/updatedAt 同单位）：
         // createdAt = 档案创建时间；updatedAt = 最近入库新作品的时间
         val createdAt: Double = 0.0, val updatedAt: Double = 0.0,
-        // 3.6.151：社团占用空间（字节）——社团列表「按文件大小」排序用
-        val totalBytes: Long = 0L
+        // 3.6.151：社团占用空间（字节）——社团排序已不用（3.6.166 删档），留作兼容
+        val totalBytes: Long = 0L,
+        // 3.6.166：封面那部作品**实际所在的社团**。社团封面可能跟随画师页口径取自别的
+        // 社团（单画师社团 / 手设覆盖），此时 coverGroup ≠ name；拼封面 URL 必须用它，
+        // 否则请求落在本社团名下、找不到那部作品，封面直接 404（用户报障：APP 社团封面空白）。
+        val coverGroup: String = ""
     )
 
 

@@ -152,7 +152,7 @@ private fun SearchGroupCard(g: Api.Group, onOpenCircle: (String) -> Unit) {
         Box(Modifier.fillMaxWidth().aspectRatio(3f / 4f).background(CARD_BG2),
             contentAlignment = Alignment.Center) {
             if (g.hasCover) {
-                AsyncImage(model = Api.coverUrl(g.name, g.coverWork),
+                AsyncImage(model = Api.coverUrl(g.coverGroup, g.coverWork),
                     contentDescription = g.name, contentScale = ContentScale.Crop,
                     modifier = Modifier.fillMaxSize())
             } else Text("📦", fontSize = 30.sp)

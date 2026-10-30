@@ -17,10 +17,24 @@ from panel.text import _norm
 
 GROUP_KEYWORDS = ["汉化", "漢化", "中国翻訳", "中国語", "搬運", "搬运", "個人", "个人"]
 
+# 3.6.166：发布平台 / 版本标记。它们既不是社团也不是画师，但在文件名里跟社团一样
+# 出现在方括号里（`[FANBOX]`、`[Digital]`、`[DL版]`…）。词条救援会拿所有括号当候选，
+# 一旦某条恰好和一 个真实词条撞名（实测 `[FANBOX]` 命中库里叫 "Fanbox" 的条目），
+# 作品就被归进一个平台名的分区。这类词一律不作候选。
+PLATFORM_TERMS = frozenset((
+    "pixiv", "fanbox", "fanza", "dlsite", "dl版", "dl", "digital", "booth", "fantia",
+    "patreon", "gumroad", "kindle", "ebook", "epub", "pdf", "同人", "成年コミック", "雑誌",
+))
+
 
 def is_group_term(s):
     """判断是否为汉化组词条（含关键词则视为汉化组，不作社团/个人名）。"""
     return any(k in s for k in GROUP_KEYWORDS)
+
+
+def is_platform_term(s):
+    """是否为发布平台/版本标记（FANBOX、DLsite、DL版…）。不作社团/画师候选。"""
+    return _norm(str(s or "")).replace(" ", "").lower() in PLATFORM_TERMS
 
 
 DEFAULT_ORIGINALS = [

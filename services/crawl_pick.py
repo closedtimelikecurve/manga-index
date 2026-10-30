@@ -1,12 +1,17 @@
 # -*- coding: utf-8 -*-
-"""services/crawl_pick.py —— 勾选作品 → 下载 → 自动入库归区（3.7.54）。
+"""services/crawl_pick.py —— 勾选作品 → 下载 → 落收件箱（3.7.54；3.6.163 改为不再自动入库）。
 
-每个 aid 走四步：
+每个 aid 走三步：
   1. `download_one` 把压缩包下到收件箱（复用既有直链候选 / 断点续传 / 三道校验）；
-  2. `_inbox_sync()` 登记 → 取回该文件的收件项；
-  3. `_inbox_confirm_one(it, circle_override=…)` 按提案入库——**社团检索时强制归到该社团**；
-  4. 原作检索：`originals_add(term, [key])` 把作品挂到该原作分区（文件名没写原作也归得进去）。
-全部结束后 force 重扫一次，两端 rev 一变就自动刷新。
+  2. `_inbox_sync()` 登记，让收件箱立刻能看到这一项；
+  3. **到此为止**——`_inbox_confirm_one` 不再自动调用。
+
+3.6.163 之前是"下载完直接确认入库、社团/原作检索时还会强制归到该社团"。用户要求
+改成先落收件箱：下载是机械动作，归到哪个社团却该由人看一眼再定——自动入库会把
+"下都下来了但没想好归哪"的东西硬塞进文库，事后还得再搬一次。
+
+代价：原作 / 社团检索进来的条目不再自动挂到那个分区，确认入库后需要手动归类。
+这一条写在 `docs/` 与 CHANGELOG 里，避免被当成回归。
 
 为什么跑在**本进程的线程**而不是子进程：入库要动 `state` / 收件箱 / 元数据库，
 子进程会带出第二份状态（与 `h()` 的前提冲突，见 `docs/architecture.md` §6）。
@@ -14,12 +19,9 @@
 
 取消只能"排到下一个之前"，正在传输的那一部会下完——不半途杀线程（会留下 .part 残包）。
 """
-import json
 import os
 import threading
 import time
-
-import meta_store as meta
 
 from common import crawl_log as log    # 3.6.156：services 层零 crawlers 顶层依赖
 from panel.host import h
@@ -178,19 +180,16 @@ def _one(job, it):
         job["failed"] += 1
         _bump()
         return
-    it["state"] = "importing"
-    _bump()
-    ok, msg, _key = _import_file(dest, job["kind"], job["term"])
+    ok, msg = _inbox_only(dest)
     if ok:
         it["state"] = "ok"
         it["msg"] = msg
         job["done"] += 1
-        _bump()
     else:
         it["state"] = "fail"
-        it["msg"] = "已下载但入库未完成：" + msg
+        it["msg"] = msg
         job["failed"] += 1
-        _bump()
+    _bump()
 
 
 def _set_bytes(it, got, total):
@@ -227,46 +226,32 @@ def _download(site, domain, aid, title, token="", on_progress=None):
     return None, "全部域名均下载失败"
 
 
-def _key_of(proposal, override, dest):
-    """入库后的作品 key（社团/文件名），与 `_inbox_move_into` 的目标一致。"""
-    circle = str(override or proposal.get("circle") or proposal.get("bare") or "").strip()
-    name = proposal.get("new_name") or os.path.basename(dest or "")
-    if not circle or not name:
-        return ""
-    return circle + "/" + os.path.splitext(name)[0]
+def _inbox_only(dest):
+    """只把文件登记进收件箱，**不自动入库**（3.6.163）。返回 (ok, 文案)。
 
+    用户明确要求：搜索下载器下回来的东西先落收件箱，由人看过、确认社团再入库。
+    自动入库会把"下都下来了、但还没想好归哪"的作品直接塞进文库——收件箱本来
+    就是为这一步设计的，绕过去等于让它失去意义。
 
-def _import_file(dest, kind, term):
-    """收件箱登记 → 确认入库 →（原作检索）补原作标签。返回 (ok, 文案, key)。
-
-    **持 SCAN_LOCK**：`/api/inbox/confirm` 是变更型端点（整个请求期持锁），
-    这条后台线程做的是同一件事（搬文件 + `_lib_touch`），不持锁就会与用户同时
-    点"确认入库"/触发重扫的请求交错搬同一个文件。RLock 可重入，内部再取不冲突。"""
+    **持 SCAN_LOCK**：`/api/inbox/sync` 会改收件箱登记表，与用户同时点
+    "确认入库"/触发重扫的请求必须串行。RLock 可重入，内部再取不冲突。
+    """
     with h().SCAN_LOCK:
-        return _import_locked(dest, kind, term)
-
-
-def _import_locked(dest, kind, term):
-    h()._inbox_sync()
-    ap = os.path.abspath(dest)
-    it = next((x for x in h().meta.inbox_list()
-               if os.path.abspath(x["src"]) == ap), None)
-    if not it:
-        return False, "收件箱里找不到刚下载的文件", ""
-    try:
-        proposal = json.loads(it["proposal"] or "{}")
-    except Exception:
-        proposal = {}
-    override = term if kind == "circle" else None
-    ok, msg = h()._inbox_confirm_one(it, circle_override=override)
-    key = _key_of(proposal, override, dest)
-    if ok and kind == "original" and key:
-        meta.originals_add(term, [key])
-    return ok, msg, key
+        h()._inbox_sync()
+        ap = os.path.abspath(dest)
+        it = next((x for x in h().meta.inbox_list()
+                   if os.path.abspath(x["src"]) == ap), None)
+        if not it:
+            return False, "已下载，但收件箱里找不到该文件"
+        return True, "已下载到收件箱，待确认入库"
 
 
 def _after_all():
-    """全部完成后重扫一次：新作品/新原作标签才会出现在分区里（两端 rev 变化即刷新）。"""
+    """全部完成后重扫一次。
+
+    3.6.163 起下载只进收件箱、不入库，所以这一步**不会**让新作品出现在分区里；
+    留着是因为同一轮里用户可能同时在网页确认了别的收件项，重扫能把它们带出来。
+    """
     try:
         h().get_library(force=True)
     except Exception as e:

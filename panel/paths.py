@@ -219,3 +219,26 @@ def _is_part_name(name):
     「不支持的文件类型」垃圾条目，必须一并排除。"""
     low = str(name).lower()
     return low.endswith(".part") or low.endswith(".part.src")
+
+
+def _cached_size(kind, path, page_files):
+    """缓存命中时补算作品大小（3.6.166）：压缩包直接 stat；文件夹按已缓存的页面路径求和。
+
+    不去重开压缩包/重新遍历目录——`page_files` 就是上次枚举的结果，路径都在里面，
+    只需 stat。它只对**旧索引**（没有 size 字段）跑一次，补完即落盘。"""
+    if kind == "archive":
+        try:
+            return os.stat(path).st_size
+        except OSError:
+            return 0
+    total, seen = 0, set()
+    for p in page_files:
+        f = p.get("p") or p.get("z") or p.get("r")
+        if not f or f in seen:
+            continue
+        seen.add(f)
+        try:
+            total += os.path.getsize(f)
+        except OSError:
+            pass
+    return total

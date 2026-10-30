@@ -46,6 +46,10 @@ def lib_env(tmp_path, monkeypatch):
     app.state.index_keys.clear()
     app.state.lib["data"] = None
     app.state.terms.update({"at": 0.0, "circles": {}, "authors": {}, "ac": {}, "main": {}})
+    # 3.6.165：`_do_scan` 现在会在扫描前预建词条库（`_prime_known_registry`），
+    # 于是 `state.known` 会跨测试残留。这里是"新建一个空库"的语义，词条库必须一起清空，
+    # 否则 `_known_learn` 看到内存里已有映射就直接 return、不写 DB（它的去重逻辑）。
+    app.state.known.update({"ready": False, "circles": set(), "pc": {}})
     yield root
     app.state.index_keys.clear()
     app.state.terms.update({"at": 0.0, "circles": {}, "authors": {}, "ac": {}, "main": {}})

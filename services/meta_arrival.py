@@ -39,3 +39,54 @@ def group_last_added(group_name):
         row = c.execute("SELECT MAX(added_at) FROM works WHERE group_name=?",
                         (group_name,)).fetchone()
         return int(row[0] or 0) if row else 0
+
+
+def group_seed(group_name):
+    """「最近入库」初始化要用的三条证据：最新 `added_at` / 那一行的 `mtime` / 分区首次登记时间。
+
+    为什么要单独给一条查询（3.6.169）：`added_at` 在**首建库回填**时是直接抄文件 mtime 的
+    （`services/db_sync._collect_group_works` 的 `initial` 分支），这时它只说明"文件内容
+    是什么时候生成的"，说明不了"什么时候进的库"。实测 2026-10-29 用户报障的三个新分区：
+
+    | 分区 | 分区首次登记 | added_at | 文件 mtime |
+    |---|---|---|---|
+    | あるるも | 10-29 14:20 | 10-22 13:18 | 10-22 13:18 |
+    | 漫画喫茶瀬戸 | 10-29 01:00 | 10-22 12:44 | 10-22 12:44 |
+    | スミヅミ | 10-29 00:45 | 10-22 12:42 | 10-22 12:42 |
+
+    前两列 `added_at == mtime`，正是回填的形状；这三个分区是那天新建目录、把老作品移进来
+    （db_sync 的 `_adopt_work_path` 会保留 added_at），于是「最近入库」卡在 10-22，
+    排到了 10-25 的 WASABI 后面——用户看到的"日期不太对"就是这里。
+
+    对照可信样本 WASABI（added_at 10-25 11:35 ≠ mtime 10-25 12:49）可见：
+    **`added_at == mtime` 就是"这条时间没有独立见证"的记号**，调用方据此决定要不要拿
+    `circles.created_at`（分区第一次被扫描到的时间，`INSERT OR IGNORE` 只写一次、
+    复制文库也不会被改写）来兜底。
+    """
+    with meta._LOCK:
+        c = meta._connect()
+        row = c.execute("SELECT added_at, mtime FROM works WHERE group_name=? "
+                        "ORDER BY added_at DESC LIMIT 1", (group_name,)).fetchone()
+        cir = c.execute("SELECT created_at FROM circles WHERE name=?", (group_name,)).fetchone()
+    return {
+        "added": int(row[0] or 0) if row else 0,
+        "mtime": int(row[1] or 0) if row else 0,
+        "born": int(cir[0] or 0) if cir else 0,
+    }
+
+
+def author_work_count(author):
+    """某画师名下有**几部**作品（work_authors 实时计数，3.6.166）。
+
+    用途是给"词条救援"降噪：孤词条回头认库内画师时，候选至少要有 2 部独立历史——
+    只有一条记录的"画师"往往正是上一次误判的产物，认了它等于把错误复制一遍。
+    不放进内存词条库：那是启动时的快照，误判写进 work_authors 后快照会把它当成
+    真画师，形成闭环。
+    """
+    try:
+        with meta._LOCK:
+            c = meta._connect()
+            return int(c.execute("SELECT COUNT(*) FROM work_authors WHERE author=?",
+                                 (str(author or ""),)).fetchone()[0])
+    except Exception:                                   # noqa: BLE001
+        return 0

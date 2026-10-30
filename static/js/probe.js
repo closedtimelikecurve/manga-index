@@ -3,7 +3,7 @@
    入口两处：① 直接进 #/probe；② 社团页 / 画师页 / 同人分区页右上角。
    3.7.59 起与「清单爬虫」彻底分开：两边任务互不影响，清单爬虫页不再有这里的入口。
    （带 kind + term 直接预填并自动搜一次）。
-   流程：搜索 → 横板卡片（压缩封面 + 标题 + 页数）勾选 → 后台下载 → 自动入库归区。
+   流程：搜索 → 横板卡片（压缩封面 + 标题 + 页数）勾选 → 后台下载 → 落收件箱待确认。
    与其余分片共享同一个全局词法环境（顺序加载，勿调整 index.html 里的 <script> 次序）。 */
 'use strict';
 
@@ -16,7 +16,7 @@ function probeKinds() {
   ];
 }
 // 3.7.57：顶部不再放"画师/社团/同人"三枚无效 chip（搜索结果都是同一个站点 q 查询，
-// kind 只决定入库归区）。改为目标站点切换；kind 仍由入口路由携带，用于自动归区。
+// kind 只决定收件箱里的归类建议）。改为目标站点切换；kind 仍由入口路由携带。
 // 3.6.156：按服务端 builtinKinds 过滤（公开版只带 JM 直连 → 只有 JM 站点可搜；
 // 老面板无该字段 → 全部显示）。站点↔任务底座：wnacg↔wnacg、JM↔jmdl、N站↔nhdl、E站↔eh。
 function probeSites() {
@@ -69,7 +69,7 @@ function renderProbe(kind, term, site) {
   } else {
     grid.innerHTML = probeEmptyHint(probe.term
       ? tf('已填入「%1」，点「搜索」才开始查询（不再自动搜）', esc(probe.term))
-      : esc(t('选择站点后输入词条，点「搜索」开始：命中后勾选要爬的作品，下载完会自动入库并归到对应分区。')));
+      : esc(t('选择站点后输入词条，点「搜索」开始：命中后勾选要爬的作品，下载完先放进收件箱，确认后再入库。')));
   }
   probeWatchStart();          // 进页面就确保看护在跑（全局浮标/进度同步靠它）
 }
@@ -274,7 +274,7 @@ function probeWatchApply(job) {
   probeWatch.wasRunning = running;
   if (prevRunning && !running && probe.job) {
     showToast(tf('搜索下载器结束：成功 %1 · 失败 %2', probe.job.done, probe.job.failed));
-    refresh(true);                     // 入库后的新作品/新原作标签这时才在索引里
+    refresh(true);                     // 收件箱里的新文件这时才在索引里
   }
   probeEmit();
 }
@@ -309,7 +309,7 @@ function probeBytesText(n) {
   return Math.round(n / 1024) + ' KB';
 }
 
-/** 正在处理的那一条（下载中/入库中）；没有则 null。 */
+/** 正在处理的那一条（下载中）；没有则 null。 */
 function probeCurrentItem(job) {
   return ((job && job.items) || []).find(it =>
     it.state === 'downloading' || it.state === 'importing') || null;
@@ -348,7 +348,7 @@ function probeRenderTicker() {
 // 3.6.141 函数化：切语言跟随（理由同 crawlJobStates）。
 function probeStateText() {
   return { queued: t('排队中'), downloading: t('下载中'), importing: t('入库中'),
-    ok: t('已入库'), fail: t('失败'), skip: t('已取消') };
+    ok: t('已放进收件箱'), fail: t('失败'), skip: t('已取消') };
 }
 
 /* 3.6.111：任务看板渲染（与清单爬虫监控同款外壳与封面卡）已整体迁至 probejob.js，

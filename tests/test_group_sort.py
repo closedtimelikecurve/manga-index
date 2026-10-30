@@ -6,6 +6,7 @@
 这里把服务端那半钉死（字段名、默认值、正倒序、同值补位、非法参数回退）。
 """
 import os
+import sqlite3
 import sys
 import time
 import zipfile
@@ -17,6 +18,7 @@ PROG_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROG_DIR)
 
 import app  # noqa: E402
+import meta_store  # noqa: E402
 
 # 都用过去的时间戳（1.6e9≈2020-09 / 1.7e9≈2023-11 / 1.75e9≈2025-06），避免造出"未来"时间干扰判断
 T_OLD, T_MID, T_NEW = 1_600_000_000, 1_700_000_000, 1_750_000_000
@@ -60,10 +62,15 @@ def _names(payload):
 
 def test_groups_expose_sort_fields(env):
     """排序依赖的三个字段必须真实可用：createdAt / updatedAt / workCount。
-    注意 updatedAt 的语义是「最近**入库新作品**」，与作品内容的 coverMtime 是两码事：
-    首次扫描时 DB 里还没有 added_at，初始化退回作品内容时间（不是档案创建时间——
-    目录 ctime 只反映"这层文件夹什么时候建的"，导入新作品不会推进它，详见
-    test_group_arrival.py 的 test_seed_uses_db_added_at_not_dir_created）。"""
+
+    updatedAt 的语义是「最近**入库新作品**」，与作品内容的 coverMtime 是两码事。
+    首扫时 DB 里还没有 added_at，初始化退回作品内容时间——**但 3.6.169 起有个例外**：
+    当分区是**新建的真实目录**、而作品是搬进来的老文件时（added_at 恰好等于文件 mtime，
+    是回填抄写、没有独立见证），取「分区成立时间」。所以这里不再断言两者恒等，
+    只断言「入库时间不早于内容时间、也不跑到未来」——恒等那条契约已由
+    test_group_arrival.py 的 test_seed_uses_db_added_at_not_dir_created 守住核心
+    （added_at 有独立见证时必须原样用它，不许退回目录时间）。
+    """
     app.get_library(force=True)
     c = app.app.test_client()
     j = c.get("/api/library").get_json()
@@ -71,7 +78,7 @@ def test_groups_expose_sort_fields(env):
     assert set(gs) == {"甲社", "乙社", "丙社"}
     for name, g in gs.items():
         assert g["createdAt"] > 0, name                       # 档案创建时间（目录 ctime）
-        assert g["updatedAt"] == g["coverMtime"], name         # 首扫：退回作品内容时间
+        assert g["coverMtime"] <= g["updatedAt"] <= time.time() + 1, name
     assert gs["甲社"]["workCount"] == 1 and gs["乙社"]["workCount"] == 3
     # 内容最新时间是另一个字段（封面/"最新：X" 用），夹具里被显式设成了 T_OLD/T_NEW
     assert int(gs["甲社"]["coverMtime"]) == T_OLD
@@ -82,6 +89,13 @@ def test_library_sort_modes_and_direction(env):
     """三种维度 × 正倒序的实际次序。入库时间显式种入状态，避免依赖"目录 ctime 的先后"。"""
     app.get_library(force=True)
     c = app.app.test_client()
+    # 夹具的目录是刚建的、作品 mtime 却是 2020/2023/2025——正是"新目录装老作品"的形状，
+    # 3.6.169 起会被判成"回填时间没有独立见证"从而用分区成立时间兜底（今天是 2026），
+    # 那样显式种入的 at 会被纠正掉。这里给每部作品的 added_at 加 1 秒，让它与 mtime 不等，
+    # 等价于"这条入库是有独立见证的"，本用例要测的排序档位才不会被初始化规则干扰。
+    with sqlite3.connect(meta_store.DB_PATH) as db:
+        db.execute("UPDATE works SET added_at = mtime + 1")
+        db.commit()
     app.state.index["groups"] = {"甲社": {"n": 1, "at": T_OLD},
                             "乙社": {"n": 3, "at": T_MID},
                             "丙社": {"n": 2, "at": T_NEW}}

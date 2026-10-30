@@ -36,7 +36,10 @@ internal fun Api.builtinKinds(): List<String>? {
 }
 
 
-/** 3.7.110 内测模式：读服务端当前状态。老面板没有 safeCovers 字段 → false（不误开）。 */
+/** 3.7.110 内测模式：读服务端当前状态。老面板没有 safeCovers 字段 → false（不误开）。
+ *
+ *  3.7.111：服务端改按端返回——APP 的请求带 `X-Client: app`，拿到的就是**手机这一端**
+ *  自己的值，网页那边的开关不再影响这里。 */
 internal fun Api.fetchSafeCovers(): Boolean {
     val o = getJson("/api/config")
     val on = o.optBoolean("safeCovers", false)
@@ -45,9 +48,13 @@ internal fun Api.fetchSafeCovers(): Boolean {
 }
 
 
-/** 3.7.110 内测模式：切换并回写本地镜像。返回服务端确认后的值。 */
+/** 3.7.110 内测模式：切换并回写本地镜像。返回服务端确认后的值。
+ *
+ *  3.7.111：带 `safe_covers_scope=app`，**只切手机这一端**——不带 scope 会被服务端
+ *  理解成"两端一起设"，那正是这次要修掉的行为。 */
 internal fun Api.setSafeCovers(on: Boolean): Boolean {
-    val o = postJson("/api/config", JSONObject().put("safe_covers", on))
+    val o = postJson("/api/config", JSONObject().put("safe_covers", on)
+        .put("safe_covers_scope", "app"))
     val now = o.optBoolean("safeCovers", on)
     safeCovers = now
     return now

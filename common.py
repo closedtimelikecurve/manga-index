@@ -137,7 +137,10 @@ def load_config():
            # 3.6.161：内测模式——所有封面统一换成占位角色图（截图给别人看时不暴露文库内容）。
            # 与启动参数 --safe-images 的区别：后者是进程内内存标志、连内页一起盖成灰度图，
            # 只能启动时定；本项可双端抽屉随时开关、只盖封面、重启后保留。
-           "safe_covers": False}
+           # 3.6.162：改为**各端独占** —— 一个人常常只想在"给别人看的那一端"遮挡，
+           # 原先一个全局布尔会让网页开了手机也跟着变。旧配置写成 true/false 的
+           # 由 `_norm_safe_covers` 按"两端同值"读入，不影响已有用户。
+           "safe_covers": {"web": False, "app": False}}
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -161,9 +164,35 @@ def _apply_config(cfg, data):
     if "no_browser" in data:
         cfg["no_browser"] = bool(data["no_browser"])
     # 3.6.161 内测模式：同样 bool 化，手写 "false" 字符串也当假（避免误开）
+    # 3.6.162 起该项是分端字典，归一交给 _norm_safe_covers
     if "safe_covers" in data:
-        cfg["safe_covers"] = _truthy(data["safe_covers"])
+        cfg["safe_covers"] = _norm_safe_covers(data["safe_covers"])
     _apply_thumb_max(cfg, data)
+
+
+# 内测模式的两个端。网页（浏览器）与 APP（原生）各自独立开关。
+SAFE_COVERS_SCOPES = ("web", "app")
+
+
+def _norm_safe_covers(v):
+    """把 `safe_covers` 归一成 `{"web": bool, "app": bool}`。
+
+    3.6.162 之前它是单个布尔；读到旧格式（或手写成 `true`/`"false"`）时按"两端同值"
+    处理——用户当时打开的是全局效果，升级后不该突然变成只有网页生效。
+    """
+    if isinstance(v, dict):
+        return {k: _truthy(v.get(k)) for k in SAFE_COVERS_SCOPES}
+    on = _truthy(v)
+    return {k: on for k in SAFE_COVERS_SCOPES}
+
+
+def safe_covers_on(cfg, scope="web"):
+    """某个端的内测模式是否开启。
+
+    内存里可能残留旧格式（配置热更新前读到的布尔），所以这里再归一一次，
+    调用方不必关心存的到底是字典还是布尔。
+    """
+    return _norm_safe_covers((cfg or {}).get("safe_covers")).get(scope, False)
 
 
 def _truthy(v):

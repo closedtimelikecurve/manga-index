@@ -32,11 +32,31 @@ from panel.http import mutating
 from routes.host import h
 
 
+def _alias_kind(body=None):
+    """从 query/body 取 kind，只认 author|circle|original，默认 author。
+
+    3.6.173 从 services/identity.py 搬来：它读的是 Flask `request.args`，本来就是
+    路由层的活；放在服务层会让"身份归一"这个纯逻辑模块被迫依赖请求上下文。
+    """
+    v = ""
+    if body and isinstance(body, dict):
+        v = str(body.get("kind", "") or "").strip().lower()
+    if not v:
+        v = str(request.args.get("kind", "") or "").strip().lower()
+    return v if v in h()._ALIAS_KINDS else "author"
+
+
+def _aliases_of(kind):
+    """按 kind 取别名表（笔名 / 社团 / 分区）。"""
+    return {"circle": h()._circle_aliases, "original": h()._original_aliases}.get(
+        kind, h()._author_aliases)()
+
+
 def api_author_aliases_get():
     """返回 {alias: canonical} 与反向 {canonical: [alias...]}（标签云/别名管理用）。
     ?kind=circle 取社团别名，默认 kind=author 取笔名别名。"""
-    kind = h()._alias_kind()
-    aliases = h()._aliases_of(kind)
+    kind = _alias_kind()
+    aliases = _aliases_of(kind)
     rev = {}
     for a, c in aliases.items():
         rev.setdefault(c, []).append(a)
@@ -47,7 +67,7 @@ def api_author_aliases_post():
     """登记一条别名：{alias: 别名, canonical: 正名, kind: author|circle}（3.0 起写元数据库）。
     写库后强制全量重扫——笔名：作者字段/标签归并；社团：作品并入正名社团。"""
     body = request.get_json(silent=True) or {}
-    kind = h()._alias_kind(body)
+    kind = _alias_kind(body)
     alias = str(body.get("alias", "")).strip()
     canonical = str(body.get("canonical", "")).strip()
     if not alias or not canonical:
@@ -98,7 +118,7 @@ def api_author_aliases_delete():
     防止合并视图把它"复活"）。删除后重扫，作品恢复原笔名/社团重新单列。
     kind=original（3.6.19）：删后重载词条库，变体不再归并到该正名。"""
     body = request.get_json(silent=True) or {}
-    kind = h()._alias_kind(body)
+    kind = _alias_kind(body)
     alias = str(body.get("alias", "")).strip()
     cfg_key = {"circle": "circle_aliases", "original": "original_aliases"}.get(
         kind, "author_aliases")

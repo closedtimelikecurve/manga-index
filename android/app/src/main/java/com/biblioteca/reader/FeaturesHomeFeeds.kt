@@ -168,7 +168,9 @@ private fun GroupCard(g: Api.Group, onOpen: (String) -> Unit, onLongPressCircle:
             .combinedClickable(onClick = { onOpen(g.name) }, onLongClick = { onLongPressCircle(g.name, cardRect) }),
             contentAlignment = Alignment.Center) {
             if (g.hasCover) {
-                AsyncImage(model = Api.coverUrl(g.name, g.coverWork), contentDescription = g.name,
+                // 3.6.166：用 coverGroup（封面作品实际所在社团），不是社团名——
+                // 社团封面常常取自画师页口径的**别的**社团，按 name 拼会 404、封面空白。
+                AsyncImage(model = Api.coverUrl(g.coverGroup, g.coverWork), contentDescription = g.name,
                     contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
                 Text("📦", fontSize = 30.sp)

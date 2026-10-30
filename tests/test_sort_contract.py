@@ -29,21 +29,25 @@ def _strip_js_comments(src):
     return re.sub(r"(?m)//[^\n]*", "", src)
 
 
-def test_web_circle_sort_bar_has_size_and_no_touched():
-    """网页社团排序条：updated / created / count / size —— 不再有 touched。"""
+def test_web_circle_sort_bar_has_no_size_and_no_touched():
+    """网页社团排序条：updated / created / count —— 没有 touched，也没有 size。
+
+    3.6.166 用户要求：「作品大小排序只需要在分区内部存在即可，社团排序不需要这个」。
+    查重是逐部作品比体积，把整个社团按总字节排一遍没有使用场景。"""
     core = _strip_js_comments(_read(JS_DIR, "core.js"))
     body = core[core.index("function sortBarHtml()"):]
     body = body[:body.index("}")]
-    assert "'size', t(" in body, "社团排序条缺「文件大小」档"
+    assert "'size'" not in body, "社团排序条还留着「文件大小」档（3.6.166 已删）"
     assert "touched" not in body, "「最近更新」档没删干净（用户要求彻底移除）"
     for key in ("updated", "created", "count"):
         assert "'" + key + "'" in body, "社团排序条丢了 %s 档" % key
 
 
 def test_web_sort_mode_folds_legacy_touched():
-    """旧缓存/旧标签里的 touched 必须回落到 updated，否则排序条没有高亮项。"""
+    """旧缓存/旧标签里的 touched（3.6.151 删）与 size（3.6.166 删）必须回落 updated，
+    否则排序条没有高亮项、点了也看不出变化。"""
     core = _strip_js_comments(_read(JS_DIR, "core.js"))
-    assert "m === 'touched' ? 'updated' : m" in core, "sortMode() 没把 touched 折回 updated"
+    assert "'touched' || m === 'size'" in core, "sortMode() 没把 touched/size 折回 updated"
 
 
 def test_web_arrows_never_flip():
@@ -80,7 +84,7 @@ def test_app_sort_bars_match_web():
     bars = _read(KT_DIR, "AppBars.kt")
     circle = bars[bars.index("internal fun CircleSortBar("):]
     circle = circle[:circle.index("\n}")]
-    assert '"size"' in circle, "APP 社团排序条缺「文件大小」档"
+    assert '"size"' not in circle, "APP 社团排序条还留着「文件大小」档（3.6.166 已删）"
     assert '"touched"' not in circle, "APP 社团排序条还留着「最近更新」档"
     # 只查"方向文案"（以箭头开头的那些）：档位名（最近入库 / 文件大小…）本来就没有箭头
     for lab in re.findall(r'AppI18n\.s\("([↑↓][^"]*)"\)', circle):
@@ -110,19 +114,23 @@ def test_group_sorts_whitelist_matches_backend_modes():
     modes.add("updated")                       # else 分支 = updated
     assert set(app.GROUP_SORTS) == modes,         "GROUP_SORTS=%r 与 sort_groups 档位=%r 不一致" % (sorted(app.GROUP_SORTS), sorted(modes))
     assert "touched" not in app.GROUP_SORTS, "touched 档已删，白名单还留着"
+    assert "size" not in app.GROUP_SORTS, "size 档已删（3.6.166），白名单还留着"
 
 
-def test_size_mode_says_big_small_not_old_new():
-    """社团排序新增「文件大小」后，方向文案必须跟着维度走。
+def test_work_size_mode_says_big_small_not_old_new():
+    """**作品**排序的「文件大小」档，方向文案必须跟着维度走。
 
-    事故形态（自查发现）：`sortDirLabel` 只认 count，size 档落到默认分支，
+    3.6.166：社团排序的这一档已删（大小只在分区内部按作品排），所以这条只钉
+    `workDirLabel`——它就是分区内作品列表用的那一个。
+
+    事故形态（自查发现）：方向文案只认 count，size 档落到默认分支，
     「文件大小」被写成"由旧到新"——维度名和方向说明打架，用户会以为排序没生效。
     """
     core = _strip_js_comments(_read(JS_DIR, "core.js"))
-    body = core[core.index("function sortDirLabel()"):]
+    body = core[core.index("function workDirLabel()"):]
     body = body[:body.index(chr(10) + "}")]
-    assert "'↓ 由小到大'" in body and "'↓ 由大到小'" in body, "size 档的方向文案缺失"
-    assert "m === 'size'" in body, "sortDirLabel 没有 size 分支"
+    assert "'↓ 由小到大'" in body and "'↓ 由大到小'" in body, "作品大小档的方向文案缺失"
+    assert "m === 'size'" in body, "workDirLabel 没有 size 分支"
 
 
 # ---------------------------------------------------------------------------

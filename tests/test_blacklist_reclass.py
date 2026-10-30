@@ -144,3 +144,28 @@ def test_blacklist_api_roundtrip(lib_env, monkeypatch):
     assert not app._term_blacklisted("测试豁免")
     assert app.CFG["term_blacklist"] == ["测试屏蔽"]
     assert app.CFG["term_whitelist"] == ["测试豁免"]
+
+
+def test_unknown_circle_rename_reports_real_location(lib_env):
+    """改名后未识别出社团：**不移动文件**，而且提示必须写出它留在哪儿（3.6.174）。
+
+    事故（2026-10-30 用户报障）：给作品改名，提示"保留在收件箱"，去收件箱却什么都没有。
+    真相是 `_apply_rename` 从来不移动——作品一直在原社团目录里，只是文件名变了。
+    "不擅自移走"是刻意的设计（见上一条测试），错的是那句恒定文案：它让人以为可以去
+    别处找。现在提示按实际位置分三种写法（收件箱 / 文库根散包区 / 原社团目录）。
+    """
+    root = lib_env
+    d = root / "社团Y"
+    d.mkdir()
+    zpath = d / "[社团Y (画师)] 某作品.zip"
+    with zipfile.ZipFile(str(zpath), "w") as z:
+        z.writestr("01.jpg", JPG)
+    lib = app.get_library(force=True)
+    g = next(g for g in lib["groups"] if g["name"] == "社团Y")
+    w = next(w for w in g["works"] if "某作品" in w["name"])
+
+    ok, msg = app._apply_rename(w, "只有标题的作品.zip")
+    assert ok, msg
+    assert "收件箱" not in msg, "还在说'保留在收件箱'（实现从不移动）"
+    assert "留在原目录" in msg and "社团Y" in msg, msg
+    assert (d / "只有标题的作品.zip").exists(), "文件被擅自移走了"

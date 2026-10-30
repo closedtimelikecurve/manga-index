@@ -304,6 +304,8 @@ Object.assign(I18N_PACKS['vi'], {
   "联网获取": "Lấy từ mạng",
   "已填入「%1」，点「搜索」才开始查询（不再自动搜）": "Đã điền «%1», bấm «Tìm» mới bắt đầu tra (không tự tìm nữa)",
   "选择站点后输入词条，点「搜索」开始：命中后勾选要爬的作品，下载完会自动入库并归到对应分区。": "Chọn site, nhập mục rồi bấm «Tìm»: đánh dấu tác phẩm muốn tải — tải xong sẽ tự nhập và xếp vào mục tương ứng.",
+  "选择站点后输入词条，点「搜索」开始：命中后勾选要爬的作品，下载完先放进收件箱，确认后再入库。": "Chọn trang, nhập từ khóa rồi bấm «Tìm»: đánh dấu các tác phẩm muốn tải — tải xong sẽ vào hộp nhận và chờ bạn xác nhận.",
+  "已放进收件箱": "Đã chuyển vào hộp nhận",
   "选目标站点 → 输入词条 → 点搜索 → 勾选下载": "Chọn site → nhập mục → Tìm → đánh dấu để tải",
   "在 %1 站内搜索（作者 / 社团 / 同人 / 标题）": "Tìm trong %1 (hoạ sĩ / nhóm / doujin / tiêu đề)",
   "搜索中…（%1 站内响应约 2~5 秒）": "Đang tìm… (%1 trả lời khoảng 2–5 giây)",

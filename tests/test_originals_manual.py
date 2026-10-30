@@ -443,3 +443,28 @@ def test_originals_rename_empty_zone_just_removes_it(lib_env):
 
 
 # ---------- 3.6.28：内置名单分区改名/归并后旧分区不得复活 ----------
+
+
+def test_create_empty_zone_via_add_endpoint(lib_env):
+    """网页端「新建分区」卡调的就是这个分支：只落词条，不搜作品、不写标签。
+
+    用户 2026-10-30：同人分区视图没有建新分区的入口，要求做成一张作品卡片（置顶）。
+    前端发 `POST /api/originals/add {term, empty:true}`，这里钉住后端那一半：
+    分区立刻可见（0 部）、词条进 config（重扫/重启后仍在）、不误给任何作品打标签。
+    """
+    _seed(lib_env)
+    client = app.app.test_client()
+    before = {z["name"]: z["works"]
+              for z in client.get("/api/originals").get_json()["originals"]}
+    zone = "新建的空分区XYZ"
+    j = client.post("/api/originals/add", json={"term": zone, "empty": True}).get_json()
+    assert j["ok"] is True and j["empty"] is True and j["existed"] is False
+    assert zone in app.CFG["originals"]          # 词条库落名：空分区靠它展示
+    zones = {z["name"]: z for z in client.get("/api/originals").get_json()["originals"]}
+    assert zones[zone]["works"] == 0             # 建好就可见，作品数是 0
+    for name, n in before.items():               # 建空分区不该动其它分区
+        assert zones[name]["works"] == n, name
+    # 同名再建一次：幂等（existed=True），词条库里不重复
+    j2 = client.post("/api/originals/add", json={"term": zone, "empty": True}).get_json()
+    assert j2["existed"] is True
+    assert [x for x in app.CFG["originals"] if x == zone] == [zone]

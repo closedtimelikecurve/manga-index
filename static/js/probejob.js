@@ -29,9 +29,9 @@ function probeJobPct(d) {
  */
 function probeJobCard(it) {
   const label = probeStateText()[it.state] || it.state;
-  const src = !it.cover ? ''
+  const src = safeCoverUrl(!it.cover ? ''
     : (it.cover.startsWith('/') ? it.cover
-      : '/api/crawl/probe/cover?u=' + encodeURIComponent(it.cover));
+      : '/api/crawl/probe/cover?u=' + encodeURIComponent(it.cover)));
   const cover = src
     ? '<img class="probe-cover" loading="lazy" alt="" src="' + esc(src) +
       '" onerror="this.classList.add(&#39;err&#39;)">'

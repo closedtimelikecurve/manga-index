@@ -162,11 +162,17 @@ async function renderFeedPartition(mode) {
     const grid2 = $('#grid');
     if (!grid2) return;
     grid2.innerHTML = '';
+    // 3.6.170：同人分区视图首位放一张「新建分区」卡（用户 2026-10-30 要求：
+    // 作品卡片形状、封面区中间一个加号、下面是文字）。空分区也照样给，否则新库没处建。
+    if (mode === 'originals') grid2.appendChild(newOriginalCard());
     if (!sorted.length) {
-      grid2.innerHTML = '<div class="sub" style="grid-column:1/-1;padding:10px">' +
-        esc(mode === 'artists' ? t('还没有画师数据') : mode === 'loved'
+      const tip = document.createElement('div');
+      tip.className = 'sub';
+      tip.style.cssText = 'grid-column:1/-1;padding:10px';
+      tip.textContent = mode === 'artists' ? t('还没有画师数据') : mode === 'loved'
           ? t('还没有喜爱的画师——切到「全部画师」，点格子右下角的 ❤ 即可喜爱')
-          : t('还没有同人标签——导入时带 (同人名) 的作品会归到这里')) + '</div>';
+          : t('还没有同人标签——导入时带 (同人名) 的作品会归到这里');
+      grid2.appendChild(tip);
       return;
     }
     const frag = document.createDocumentFragment();
@@ -204,12 +210,43 @@ async function renderFeedPartition(mode) {
         if (mode === 'loved' && !loved) h.closest('.circle-card').remove();   // 喜爱分区里取消 → 移出卡片
       } catch (e) { showToast(tf('%1：%2', t('失败'), e.message)); }
     }));
-    grid2.querySelectorAll('.circle-card').forEach(card => card.addEventListener('click', () => {
-      if (card.dataset.artist) location.hash = '#/artist/' + enc(card.dataset.artist);
-      else if (card.dataset.original) location.hash = '#/tag/original/' + enc(card.dataset.original);
-    }));
+    // 卡片跳转是 `#grid` 上的**委托**（menu.js）：按 dataset.group / artist / original 分派。
+    // 3.6.170 起不再逐卡 addEventListener —— 逐卡绑的那份会被委托覆盖成 `#/circle/undefined`，
+    // 画师卡和同人卡因此点不进去（两处逻辑并存时，谁最后写 hash 谁说话）。
   } catch (e) {
     const grid2 = $('#grid');
     if (grid2) grid2.innerHTML = '<div class="sub" style="grid-column:1/-1;padding:10px">' + esc(tf('%1失败：%2', t('加载'), e.message)) + '</div>';
   }
+}
+
+/* ---------- 3.6.170 同人分区视图：「新建分区」卡（置顶，作品卡片形状） ----------
+   用户在 2026-10-30 提出：同人分区视图没有建新分区的入口，而且要求它就是一张作品卡
+   （封面区中间一个加号，下面是文字），排在最前面。
+   建的是**空分区**（后端 /api/originals/add 的 `empty:true` 分支）：只往 config 词条库
+   落名，不搜作品、不写标签；之后在该分区里「＋ 添加作品」补。 */
+function newOriginalCard() {
+  const d = document.createElement('div');
+  d.className = 'circle-card add-zone';
+  d.id = 'btnNewOriginal';
+  d.title = t('新建一个空的同人分区（之后在分区里「＋ 添加作品」补作品）');
+  d.innerHTML =
+    '<div class="circle-cover"><div class="ph">＋</div></div>' +
+    '<div class="circle-meta">' +
+      '<div class="circle-name">' + esc(t('新建分区')) + '</div>' +
+      '<div class="circle-sub">' + esc(t('建一个空的同人分区')) + '</div>' +
+    '</div>';
+  d.addEventListener('click', createOriginalZone);
+  return d;
+}
+
+async function createOriginalZone() {
+  const name = (prompt(t('新建同人分区：输入分区名（先建一个空分区，之后在分区里点「＋ 添加作品」补作品）'), '') || '').trim();
+  if (!name) return;
+  try {
+    const r = await api('/api/originals/add', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ term: name, empty: true }) });
+    showToast(r.existed ? tf('分区「%1」已存在', r.canon) : tf('已新建分区「%1」', r.canon));
+    renderFeedPartition('originals');
+  } catch (e) { showToast(tf('%1：%2', t('失败'), e.message)); }
 }

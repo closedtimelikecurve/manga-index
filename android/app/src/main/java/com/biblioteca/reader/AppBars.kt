@@ -154,16 +154,17 @@ internal fun FeedSortBar(mode: String, asc: Boolean, onSort: (String, Boolean) -
     SortBar(modes, eff, asc, onSort, dirLabel, onDir = { onSort(eff, !asc) })
 }
 
-/** 社团排序条：最近入库 / 创建时间 / 作品数量 / 文件大小 + 方向键。 */
+/** 社团排序条：最近入库 / 创建时间 / 作品数量 + 方向键。
+ *  3.6.166：**去掉「文件大小」档**——用户要求大小排序只在分区内部按作品排，
+ *  社团层面不需要。存量偏好存着 size 的，AppState 里已回落成 updated。 */
 @Composable
 internal fun CircleSortBar(mode: String, asc: Boolean, onSort: (String, Boolean) -> Unit) {
     val modes = listOf("updated" to AppI18n.s("最近入库"), "created" to AppI18n.s("创建时间"),
-                       "count" to AppI18n.s("作品数量"), "size" to AppI18n.s("文件大小"))
+                       "count" to AppI18n.s("作品数量"))
     // 3.6.151：**箭头固定朝下**（表示列表从上到下的方向），只有文字随正/倒序变。
     // 用户明确要求：箭头跟着翻转会让人误以为排序维度变了，实际只是顺序反过来。
     val dirLabel = when {
         mode == "count" -> if (asc) AppI18n.s("↓ 由少到多") else AppI18n.s("↓ 由多到少")
-        mode == "size" -> if (asc) AppI18n.s("↓ 由小到大") else AppI18n.s("↓ 由大到小")
         else -> if (asc) AppI18n.s("↓ 由旧到新") else AppI18n.s("↓ 由新到旧")
     }
     SortBar(modes, mode, asc, onSort, dirLabel, onDir = { onSort(mode, !asc) })

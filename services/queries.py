@@ -101,8 +101,12 @@ def public_group(g):
     # 重新应用区域封面覆盖：set-cover 后立即可见，无需等后台重扫（无覆盖时只是一次廉价字典查找）
     ov = h()._resolve_region_cover("circle", name)
     if ov:
-        cover_work = h().find_work(ov["group"], ov["work"])
-        cover_group = ov["group"]
+        # 3.6.166：覆盖坐标**可能悬空**（手设封面那部作品后来被删/改名/移出文库）。
+        # 找不到就保持 g 里已有的派生封面——旧代码无条件覆盖，会把 cover_work 置空、
+        # 卡片直接变成占位图标，看起来像整个社团的作品都没了。
+        owk = h().find_work(ov["group"], ov["work"])
+        if owk:
+            cover_work, cover_group = owk, ov["group"]
     return {
         "name": name, "workCount": len(g["works"]),
         "hasCover": bool(cover_work),

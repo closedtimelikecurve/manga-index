@@ -316,3 +316,33 @@ def test_data_i18n_attributes_have_explicit_values():
     js = _js_src("i18n")
     assert "getAttribute('data-i18n') || el.textContent.trim()" in js, \
         "i18nApplyDom 缺空属性防御（应回退用元素自身文字当 key）"
+
+
+def test_grid_delegation_dispatches_by_card_kind():
+    """`#grid` 的点击委托必须按卡类型分派（3.6.170）。
+
+    事故：分区视图（全部画师 / 同人分区 / 喜爱）的卡片**复用** `.circle-card` 样式，
+    但没有 `dataset.group`，而委托无条件 `location.hash = '#/circle/' + enc(group)`
+    → `#/circle/undefined`，前端找不到该社团、踢回首页，表现就是
+    「网页端画师页和同人分区点不进去」。APP 是原生渲染，所以只有网页端坏、长期没被发现。
+    """
+    src = _js_src("menu")
+    assert "circle.dataset.artist" in src, "委托没处理画师卡"
+    assert "circle.dataset.original" in src, "委托没处理同人分区卡"
+    assert not re.search(r"if \(circle\)\s*\{\s*location\.hash = '#/circle/'", src), \
+        "委托又变回「任何 .circle-card 都当社团卡」了"
+    # 逐卡绑定与委托并存时会互相覆盖 hash（谁最后写谁说话），只留委托一处
+    assert "querySelectorAll('.circle-card').forEach" not in _js_src("home"), \
+        "home.js 又给分区卡逐卡绑了跳转，会和 #grid 委托打架"
+
+
+def test_originals_view_has_new_zone_card_on_top():
+    """同人分区视图首位必须有「新建分区」卡（3.6.170，用户要求：作品卡片形状、中间加号、下面文字）。"""
+    home = _js_src("home")
+    assert "function newOriginalCard" in home
+    assert "grid2.appendChild(newOriginalCard())" in home
+    assert "empty: true" in home, "没用后端「只建空分区」那条分支（会顺手把命中的作品全打上标签）"
+    # 置顶：加号卡必须在渲染数据卡之前追加
+    i_add = home.index("grid2.appendChild(newOriginalCard())")
+    i_loop = home.index("for (const a of sorted)")
+    assert i_add < i_loop, "「新建分区」卡没有排在首位"

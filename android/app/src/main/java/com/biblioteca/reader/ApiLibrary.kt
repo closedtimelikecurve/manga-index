@@ -8,8 +8,8 @@ import java.io.File
 
 /**
  * 社团排序（与服务端 sort_groups() 语义一致，本地排序、切换即时生效）：
- *   mode = "updated"（最近入库新作品，默认）/ "created"（档案创建时间）/
- *          "count"（作品数量）/ "size"（占用空间）；
+ *   mode = "updated"（最近入库新作品，默认）/ "created"（档案创建时间）/ "count"（作品数量）；
+ *   3.6.166：**"size" 档已删除**（用户要求大小排序只在分区内部按作品排），传进来按 updated 处理。
  *   asc = false → **由新到旧 / 由多到少 / 由大到小**（默认降序）；asc = true → 由旧到新 / 由少到多 / 由小到大。
  * 同值时按名称升序补位，列表不会在刷新之间跳动。
  *
@@ -24,8 +24,7 @@ internal fun Api.sortCircles(list: List<Api.Group>, mode: String, asc: Boolean):
         when (mode) {
             "created" -> Math.round(g.createdAt).toDouble()
             "count" -> g.workCount.toDouble()
-            "size" -> g.totalBytes.toDouble()
-            else -> Math.round(g.updatedAt).toDouble()
+            else -> Math.round(g.updatedAt).toDouble()      // 含已删除的 "size"
         }
     }
     val cmp = Comparator<Api.Group> { a, b ->
@@ -75,10 +74,12 @@ private fun Api.parseGroups(arr: org.json.JSONArray?): List<Api.Group> {
             g.optString("coverWork"), g.optLong("coverMtime"), g.optString("coverVer"),
             g.optDouble("createdAt", 0.0),
             g.optDouble("updatedAt", g.optLong("coverMtime").toDouble()),
-            g.optLong("totalBytes", 0L)     // 3.6.151：社团占用空间，「按文件大小」排序用
+            g.optLong("totalBytes", 0L),    // 3.6.151：社团占用空间（社团排序已不用，留作兼容）
+            g.optString("coverGroup").ifEmpty { g.getString("name") }   // 3.6.166：封面作品所在社团
         )
-        // 社团封面图的缓存键：登记在 (社团, 封面作品) 上，coverUrl 自动取用
-        rememberVer(grp.name, grp.coverWork, grp.coverVer)
+        // 社团封面图的缓存键：登记在 (**封面作品所在社团**, 封面作品) 上——
+        // 与 coverUrl 的入参一致，否则跨社团封面查不到版本号，换封面后缓存不失效。
+        rememberVer(grp.coverGroup.ifEmpty { grp.name }, grp.coverWork, grp.coverVer)
         out.add(grp)
     }
     return out

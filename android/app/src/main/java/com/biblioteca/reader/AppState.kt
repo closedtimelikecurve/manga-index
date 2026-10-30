@@ -163,9 +163,11 @@ class AppState(
     var feedSortAsc by mutableStateOf(prefs.getBoolean("feed_sort_asc", false))
     var homeArtists by mutableStateOf<List<Api.ArtistItem>?>(null)
     var homeOriginals by mutableStateOf<List<Api.OriginalItem>?>(null)
-    // 3.6.151：touched（最近更新）档已删除，存量偏好回落成 updated，否则排序条上没有高亮项
+    // 3.6.151：touched（最近更新）档已删除；3.6.166：size（文件大小）档已删除。
+    // 存量偏好一律回落成 updated，否则排序条上没有高亮项、点了也看不出变化。
     var circleSort by mutableStateOf(
-        (prefs.getString("circle_sort", "updated") ?: "updated").let { if (it == "touched") "updated" else it })
+        (prefs.getString("circle_sort", "updated") ?: "updated")
+            .let { if (it == "touched" || it == "size") "updated" else it })
     var circleSortAsc by mutableStateOf(prefs.getBoolean("circle_sort_asc", false))
 
     var addOriginalMsg by mutableStateOf("")

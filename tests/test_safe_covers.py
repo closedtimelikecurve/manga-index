@@ -44,10 +44,10 @@ def test_off_serves_real_cover(client):
 
 def test_on_serves_placeholder(client):
     """开着的时候即使参数缺失也直接给占位图——说明走在找作品之前。"""
-    app.CFG["safe_covers"] = True
+    app.CFG["safe_covers"] = {"web": True, "app": False}   # 3.6.162 起分端
     r = client.get("/cover")
     assert r.status_code == 200
-    assert r.headers["X-Img-Mode"] == "safe"
+    assert r.headers["X-Img-Mode"] == "safe:web"
     assert r.headers["Cache-Control"] == "no-cache"      # 关掉开关要立刻看到真封面
     # 内容确实是那张占位图（不是碰巧 200 的真实封面）。
     # 公开树不随附 safe_cover.jpg，此时应回退 placeholder.png —— 两棵树都要过。
@@ -58,21 +58,21 @@ def test_on_serves_placeholder(client):
 
 def test_on_falls_back_when_image_missing(client, monkeypatch):
     """公开版不随这张图分发：文件缺失要退回 placeholder.png，不能 500。"""
-    app.CFG["safe_covers"] = True
+    app.CFG["safe_covers"] = {"web": True, "app": False}
     monkeypatch.setattr(safecover, "SAFE_COVER_IMG", os.path.join(PROG_DIR, "no", "such.jpg"))
     r = client.get("/cover")
     assert r.status_code == 200
-    assert r.headers["X-Img-Mode"] == "safe"
+    assert r.headers["X-Img-Mode"] == "safe:web"
     assert r.headers["Content-Type"].startswith("image/png")
     assert r.data == _bytes(safecover.PLACEHOLDER_IMG)
 
 
 def test_probe_cover_also_masked(client):
     """搜索下载器的探针封面同样是封面，不能漏。"""
-    app.CFG["safe_covers"] = True
+    app.CFG["safe_covers"] = {"web": True, "app": False}
     r = client.get("/api/crawl/probe/cover?u=https://example.com/a.jpg")
     assert r.status_code == 200
-    assert r.headers["X-Img-Mode"] == "safe"
+    assert r.headers["X-Img-Mode"] == "safe:web"
 
 
 def test_toggle_via_config_post(client):
@@ -80,11 +80,11 @@ def test_toggle_via_config_post(client):
     r = client.post("/api/config", json={"safe_covers": True})
     assert r.status_code == 200
     assert r.get_json()["safeCovers"] is True
-    assert app.CFG["safe_covers"] is True
+    assert common.safe_covers_on(app.CFG, "web") is True
 
     r = client.post("/api/config", json={"safe_covers": False})
     assert r.get_json()["safeCovers"] is False
-    assert app.CFG["safe_covers"] is False
+    assert common.safe_covers_on(app.CFG, "web") is False
     # 关了之后封面恢复原逻辑
     assert client.get("/cover").status_code == 404
 
@@ -98,7 +98,9 @@ def test_toggle_writes_config_file(client):
     client.post("/api/config", json={"safe_covers": True})
     import json
     with open(common.CONFIG_FILE, encoding="utf-8") as f:
-        assert json.load(f).get("safe_covers") is True
+        saved = json.load(f).get("safe_covers")
+    # 不带 scope 的旧调用仍按两端一起设（3.6.162 的分端语义见 test_safe_covers_scope.py）
+    assert saved == {"web": True, "app": True}
 
 
 def test_string_false_is_false(client):

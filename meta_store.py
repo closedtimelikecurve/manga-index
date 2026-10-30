@@ -438,6 +438,8 @@ _LAZY_MODULES = {
     # 入库时间读取（3.6.151：文件顶到 400 行预算，搬去 services/meta_arrival.py）
     "works_added_at": "services.meta_arrival",
     "group_last_added": "services.meta_arrival",
+    "group_seed": "services.meta_arrival",
+    "author_work_count": "services.meta_arrival",
     "search2": "services.search",
     "_fw_variant": "services.search",
     # 扫描落库流水线（3.6.77）

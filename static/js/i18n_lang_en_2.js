@@ -304,6 +304,8 @@ Object.assign(I18N_PACKS['en'], {
   "联网获取": "Fetch online",
   "已填入「%1」，点「搜索」才开始查询（不再自动搜）": "“%1” is filled in — tap Search to start the query (no auto-search anymore)",
   "选择站点后输入词条，点「搜索」开始：命中后勾选要爬的作品，下载完会自动入库并归到对应分区。": "Pick a site, type an entry, then tap Search: check the works you want, and the finished download is imported and filed into its section automatically.",
+  "选择站点后输入词条，点「搜索」开始：命中后勾选要爬的作品，下载完先放进收件箱，确认后再入库。": "Pick a site, type an entry, then tap Search: check the works you want — finished downloads go to the inbox and wait for your confirmation.",
+  "已放进收件箱": "Moved to inbox",
   "选目标站点 → 输入词条 → 点搜索 → 勾选下载": "Pick a site → type an entry → Search → check & download",
   "在 %1 站内搜索（作者 / 社团 / 同人 / 标题）": "Search on %1 (artist / circle / doujin / title)",
   "搜索中…（%1 站内响应约 2~5 秒）": "Searching… (%1 answers in about 2–5 s)",

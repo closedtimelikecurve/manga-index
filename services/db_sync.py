@@ -16,11 +16,12 @@
 """
 import logging
 import os
+import time
 
 import meta_store as meta
 
 
-def _scan_collect(c, groups):
+def _scan_collect(c, groups, initial):
     """扫描阶段一：登记 circles，收集去重后的作品清单，返回 (seen, wanted)。
 
     同一物理 path 可能重复出现（合作社团作品被挂到多个子社团），works.path 唯一约束下
@@ -35,12 +36,19 @@ def _scan_collect(c, groups):
             continue
         c.execute("INSERT OR IGNORE INTO circles(name, created_at) VALUES(?,?)",
                   (gname, int(g.get("created_at") or 0)))
-        _collect_group_works(g, gname, seen, wanted, seen_paths, seen_keys)
+        _collect_group_works(g, gname, seen, wanted, seen_paths, seen_keys, initial)
     return seen, wanted
 
 
-def _collect_group_works(g, gname, seen, wanted, seen_paths, seen_keys):
-    """一个社团下的作品：按真实归档名算落库 key，去重后进 wanted。"""
+def _collect_group_works(g, gname, seen, wanted, seen_paths, seen_keys, initial):
+    """一个社团下的作品：按真实归档名算落库 key，去重后进 wanted。
+
+    `added_at` = **首次见到这部作品的时刻**（3.6.166 修正）。只有首次建库回填
+    （`initial`）才用文件 mtime 作历史近似——那时没有"见到时刻"这种东西。
+    此前两者都写 mtime，于是"最近入库"实际变成了"文件内容最新"：从别处复制、
+    下载工具保留服务器时间、从压缩包里解出来的新作品，都会顶着很旧的文件时间
+    沉到列表末尾（用户报障，已用 test_new_circle_with_old_file_time_still_sorts_first 复现）。
+    """
     for w in g.get("works") or []:
         # 3.6.11 社团别名：并入正名社团展示的作品，仍按**真实所在社团**落 key/group_name
         # （w["_group"]，由 app._merge_alias_circles 打标）。否则别名一登记 key 就从
@@ -56,7 +64,7 @@ def _collect_group_works(g, gname, seen, wanted, seen_paths, seen_keys):
         seen_keys.add(key)
         seen.append(key)
         mtime0 = int(float(w.get("mtime") or 0))
-        added0 = mtime0 or int(float(g.get("updated_at") or 0))
+        added0 = (mtime0 or int(float(g.get("updated_at") or 0))) if initial else int(time.time())
         wanted.append((key, owner, w, added0))
 
 
@@ -268,7 +276,7 @@ def sync_scan(groups):
     with meta._LOCK:
         c = meta._connect()
         initial = meta._kv_get(c, "backfill_done") != "1"
-        seen, wanted = _scan_collect(c, groups)
+        seen, wanted = _scan_collect(c, groups, initial)
         fts_dirty = _scan_sync_works(c, wanted, seen)
         _scan_sync_derived(c, wanted, seen, fts_dirty)
         fts_dirty.update(_scan_prune(c, seen))

@@ -72,7 +72,8 @@ private fun SearchGroupCard(g: Api.Group, onOpen: (String) -> Unit, onLongPressC
             .combinedClickable(onClick = { pendingSearchRestore = true; searchOpen = false; onOpen(g.name) },
                 onLongClick = { onLongPressCircle(g.name, groupRect) }), contentAlignment = Alignment.Center) {
             if (g.hasCover) {
-                AsyncImage(model = Api.coverUrl(g.name, g.coverWork), contentDescription = g.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                // 3.6.166：同上——封面作品可能不在本社团，必须走 coverGroup
+                AsyncImage(model = Api.coverUrl(g.coverGroup, g.coverWork), contentDescription = g.name, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else Text("📦", fontSize = 30.sp)
         }
         Column(Modifier.padding(8.dp)) {

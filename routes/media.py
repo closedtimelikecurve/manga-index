@@ -184,7 +184,8 @@ def _lowres_seed(src, src_name):
 
 def api_cover():
     # 3.6.161 内测模式优先：用户主动选的占位图比 --safe-images 的灰度图更贴近真实界面
-    safe = safecover.response()
+    # 3.6.162 各端独占：按请求来自哪一端（APP 带头 / 浏览器默认 web）取各自的开关
+    safe = safecover.response(h().client_scope())
     if safe is not None:
         return safe
     if getattr(h(), "SAFE_IMAGES", False):
