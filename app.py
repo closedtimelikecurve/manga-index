@@ -80,7 +80,7 @@ sys.dont_write_bytecode = True
 #      （新增字段不算）。
 # VERSION 文件与本常量同源（面板版本），启动器标题读它。
 # ---------------------------------------------------------------
-PANEL_VERSION = "3.6.175"
+PANEL_VERSION = "3.6.176"
 APP_VERSION = PANEL_VERSION      # 历史名兼容（曾用于"全系统一个号"，现仅代表面板版本）
 SERVER_API_LEVEL = 1
 MIN_APP_API = 1

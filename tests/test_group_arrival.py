@@ -62,6 +62,27 @@ def _bump_mtime(p, secs=100):
     os.utime(str(p), (st.st_atime, st.st_mtime + secs))
 
 
+def _age_circles(*names):
+    """把这些分区的「首次登记时间」也回拨到 OLD —— 让"老分区 + 老入库记录"这个前提自洽。
+
+    3.6.169 起「最近入库」会用 `circles.created_at` 纠正"回填形状"（`added_at == mtime`）
+    的历史错值：分区今天才成立、记录却停在文件时间，就该记今天。本文件里这些用例
+    只把索引的 `at` 设成 OLD，却让 `created_at` 留在"刚才首扫"的当下 —— 测试凭空造出
+    "分区 1 秒前才登记、却说它很久以前入库"这种真实世界不存在的状态，于是纠正分支
+    把 `at` 顶到现在。
+
+    这一步**跨不跨秒**决定成败：回填的 mtime 与 `created_at` 落在同一整秒时纠正不触发、
+    测试变绿，跨一秒就红。2026-10-30 公共仓库 CI 上 3.12 / 3.13 两个 job 一红一绿、
+    本地连跑 5 次 2 绿 3 红，就是这么来的。回拨之后断言与实现口径一致，不再看运气。
+    """
+    if not names:
+        return
+    with sqlite3.connect(meta_store.DB_PATH) as db:
+        db.executemany("UPDATE circles SET created_at=? WHERE name=?",
+                       [(int(OLD), n) for n in names])
+        db.commit()
+
+
 def test_content_edit_does_not_bump(env):
     """只改作品文件内容（含"临时文件 + os.replace"整包重写，即删首页图片那种机制）→ 排序不动。"""
     app.get_library(force=True)
@@ -96,6 +117,7 @@ def test_new_work_bumps_and_sorts_first(env):
     idx_groups = app.state.index.setdefault("groups", {})
     for name, cnt in ((k, v["workCount"]) for k, v in _groups(c).items()):
         idx_groups[name] = {"n": cnt, "at": OLD}
+    _age_circles(*[k for k, v in _groups(c).items()])      # 分区成立时间也是"很久以前"
     app.get_library(force=True)
     assert _groups(c)["甲社"]["updatedAt"] == OLD                       # 数量没变 → 保持
 
@@ -117,6 +139,7 @@ def test_delete_does_not_bump(env):
     c = app.app.test_client()
     n = _groups(c)["乙社"]["workCount"]
     app.state.index.setdefault("groups", {})["乙社"] = {"n": n, "at": OLD}
+    _age_circles("乙社")
     app.get_library(force=True)
     os.unlink(str(env["乙社"] / "[乙社] 作品1.zip"))
     app.get_library(force=True)
@@ -129,6 +152,7 @@ def test_rename_does_not_bump(env):
     c = app.app.test_client()
     n = _groups(c)["乙社"]["workCount"]
     app.state.index.setdefault("groups", {})["乙社"] = {"n": n, "at": OLD}
+    _age_circles("乙社")
     app.get_library(force=True)
     os.rename(str(env["乙社"] / "[乙社] 作品1.zip"), str(env["乙社"] / "[乙社] 作品一（改名）.zip"))
     app.get_library(force=True)
@@ -189,6 +213,7 @@ def test_state_survives_index_reload(env):
     c = app.app.test_client()
     n = _groups(c)["甲社"]["workCount"]
     app.state.index.setdefault("groups", {})["甲社"] = {"n": n, "at": OLD}
+    _age_circles("甲社")
     app.get_library(force=True)                        # 这一步把状态写进 library_index.json
 
     app.state.index_loaded = False                          # 模拟面板重启后重新加载索引
